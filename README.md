@@ -1,0 +1,1 @@
+Welcome to my image captioning project! I implemented and trained a vision transformer from scratch.
