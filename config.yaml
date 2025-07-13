@@ -1,0 +1,23 @@
+context_size: 60
+patch_size: 16
+image_size: 224
+
+transformer_encoder_config:
+  stack_size: 6
+  num_heads: 8
+  hidden_size: 512
+  key_size: 64
+  value_size: 64
+  feedforward_size: 2048
+  dropout: 0.1
+
+transformer_decoder_config:
+  stack_size: 6
+  num_heads: 8
+  hidden_size: 512
+  key_size: 64
+  value_size: 64
+  feedforward_size: 2048
+  dropout: 0.1
+
+num_workers: 10 # Set according to your hardware
