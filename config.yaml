@@ -20,4 +20,5 @@ transformer_decoder_config:
   feedforward_size: 2048
   dropout: 0.1
 
+batch_size: 128
 num_workers: 10 # Set according to your hardware

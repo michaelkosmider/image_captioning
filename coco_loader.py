@@ -35,14 +35,14 @@ class CocoDataset(Dataset):
         return image_transformed, caption_tensor
 
 
-def coco_collate_fn(batch, pad_idx):
+def coco_collate_fn(batch, pad_idx, context_size):
 
     images = []
     captions = []
 
     for image, caption in batch:
         images.append(image)
-        captions.append(caption)
+        captions.append(caption[:context_size])  # Truncate if needed
 
     images_batch = torch.stack(images, dim=0)
     captions_batch = pad_sequence(captions, batch_first=True, padding_value=pad_idx)
@@ -50,7 +50,7 @@ def coco_collate_fn(batch, pad_idx):
     return images_batch, captions_batch
 
 
-def get_coco_loader(split, batch_size, transform, pad_idx, num_workers):
+def get_coco_loader(split, batch_size, context_size, transform, pad_idx, num_workers):
     dataset = CocoDataset(
         paths["images"][split],
         paths["captions_tokenized"][split],
@@ -60,7 +60,7 @@ def get_coco_loader(split, batch_size, transform, pad_idx, num_workers):
         dataset,
         batch_size=batch_size,
         shuffle=(True if split == "train" else False),
-        collate_fn=partial(coco_collate_fn, pad_idx=pad_idx),
+        collate_fn=partial(coco_collate_fn, pad_idx=pad_idx, context_size=context_size),
         num_workers=num_workers,
         pin_memory=True,
     )
