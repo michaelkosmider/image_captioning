@@ -1,15 +1,14 @@
-# This is an object obtaining the paths of various files. Peek inside paths.py for usage.
-from paths import paths
-
+import argparse
 import os
-import torch
-from torch.optim import Adam
+import sys
 import pickle
 import yaml
+from tqdm import tqdm
+from paths import paths
+import torch
+from torch.optim import Adam
 from torchvision import transforms
 from coco_loader import get_coco_loader
-from tqdm import tqdm
-import argparse
 
 # Model Definition (my very own, in-house transformer implementation!!)
 from transformer_components import (
@@ -22,16 +21,35 @@ from image_captioner import ImageEncoder, CaptionDecoder
 # Section 1: Read in model and training configuration.
 # =============================================================================
 
-
+# Get checkpoint if passed in.
 parser = argparse.ArgumentParser()
-parser.add_argument("-c", "--checkpoint", type=str, default=None, help="Path to checkpoint to resume training")
+parser.add_argument(
+    "-c",
+    "--checkpoint",
+    type=str,
+    default=None,
+    help="Path to checkpoint to resume training",
+)
 args = parser.parse_args()
 
+os.makedirs(paths["checkpoint"], exist_ok=True)
+checkpoint = None
+if args.checkpoint is not None:
+    checkpoint_path = os.path.join(paths["checkpoint"], args.checkpoint)
+
+    if os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, pickle_module=pickle)
+    else:
+        print(f"The path {checkpoint_path} does not exist!")
+        sys.exit(1)
+
+# Get hyper-parameters.
 tokenizer_info = torch.load(paths["tokenizer_info"], weights_only=False)
 with open(paths["config"], "r") as f:
     config = yaml.safe_load(f)
 
-BATCH_SIZE = 64
+EPOCHS = config["epochs"]
+BATCH_SIZE = config["batch_size"]
 NUM_WORKERS = config["num_workers"]
 CONTEXT_SIZE = config["context_size"]
 PATCH_SIZE = config["patch_size"]
@@ -42,11 +60,14 @@ transformer_encoder_config = config["transformer_encoder_config"]
 transformer_decoder_config = config["transformer_decoder_config"]
 
 # Set device.
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "mps" if torch.backends.mps.is_available() else "cpu"
-)
+if "device" in config:
+    device = config["device"]
+else:
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps" if torch.backends.mps.is_available() else "cpu"
+    )
 print(f"You are using {device}.")
 
 # =============================================================================
@@ -102,27 +123,20 @@ model = TransformerEncoderDecoder(
 optimizer = Adam(model.parameters(), 0.0001)
 criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
 
-# Track progress.
+# Initialize training history.
 train_losses = []
 val_losses = []
 epochs_completed = 0
 
-if args.checkpoint is not None:
-    checkpoint_path = os.path.join(paths["checkpoint"], args.checkpoint)
-    checkpoint = torch.load(, pickle_module=pickle)
-
+# Load all of the above from checkpoint if a checkpoint was passed in.
+if checkpoint is not None:
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
     epochs_completed = checkpoint["epochs_completed"]
     train_losses = checkpoint["train_losses"]
     val_losses = checkpoint["val_losses"]
-else:
-    os.makedirs(paths["checkpoint"], exist_ok=True)
 
-epochs = 1
-
-
-for epoch in range(epochs_completed, epochs_completed + epochs):
+for epoch in range(epochs_completed, epochs_completed + EPOCHS):
 
     # Train
     train_batches = tqdm(
@@ -130,8 +144,8 @@ for epoch in range(epochs_completed, epochs_completed + epochs):
     )
     train_loss = 0
     train_token_count = 0
+
     model.train()
-    # Note: img and caption are batches, not single instances.
     for img, caption in train_batches:
 
         optimizer.zero_grad()
@@ -207,5 +221,7 @@ for epoch in range(epochs_completed, epochs_completed + epochs):
         "train_losses": train_losses,
         "val_losses": val_losses,
     }
-    checkpoint_path = os.path.join(paths["checkpoint"], f"checkpoint{epoch}.pt")
+    checkpoint_path = os.path.join(
+        paths["checkpoint"], f"checkpoint{epochs_completed}.pt"
+    )
     torch.save(checkpoint, checkpoint_path)

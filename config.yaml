@@ -22,3 +22,4 @@ transformer_decoder_config:
 
 batch_size: 128
 num_workers: 10 # Set according to your hardware
+epochs: 2 # Number of additional (not total) of epochs.
