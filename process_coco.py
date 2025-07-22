@@ -106,16 +106,6 @@ else:
     # Save the tokenizer.
     tokenizer.save(paths["tokenizer"])
 
-    # Save special token inds.
-    tokenizer_info = {
-        "<SOS>": tokenizer.token_to_id("<SOS>"),
-        "<EOS>": tokenizer.token_to_id("<EOS>"),
-        "<PAD>": tokenizer.token_to_id("<PAD>"),
-        "<UNK>": tokenizer.token_to_id("<UNK>"),
-        "vocab_size": tokenizer.get_vocab_size(),
-    }
-    torch.save(tokenizer_info, paths["tokenizer_info"])
-
 # =============================================================================
 # Section 3: Tokenize all captions.
 # =============================================================================
@@ -129,9 +119,9 @@ for split in ["train", "val"]:
 
             for annotation in annotations:
                 caption_ids = (
-                    [tokenizer_info["<SOS>"]]
+                    [tokenizer.token_to_id("<SOS>")]
                     + tokenizer.encode(annotation["caption"]).ids
-                    + [tokenizer_info["<EOS>"]]
+                    + [tokenizer.token_to_id("<EOS>")]
                 )
                 image_id = annotation["image_id"]
                 annotation_tokenized = {"caption": caption_ids, "image_id": image_id}

@@ -17,15 +17,18 @@ class PatchEmbedding(nn.Module):
         )
 
         num_patches = (image_size // patch_size) ** 2
-        self.pos_encoding = nn.Parameter(torch.zeros(1, num_patches, hidden_size))
+        self.pos_encoding = nn.Embedding(num_patches, hidden_size)
 
-    def forward(self, x):
-        x = self.image_to_patch_projections(x)
-        x = x.flatten(-2, -1)
-        x = x.transpose(1, 2)
-        x = x + self.pos_encoding
+    def forward(self, X, positions):
+        X = self.image_to_patch_projections(X)
+        X = X.flatten(-2, -1)
+        X = X.transpose(1, 2)
+        if positions is None:
+            X = X + self.pos_encoding(torch.arange(X.shape[1], device=X.device))
+        else:
+            X = X[:, positions, :] + self.pos_encoding(positions)
 
-        return x
+        return X
 
 
 class ImageEncoder(nn.Module):
@@ -39,9 +42,9 @@ class ImageEncoder(nn.Module):
 
         self.transformer_encoder = TransformerEncoder(**transformer_encoder_config)
 
-    def forward(self, X, key_padding_mask):
+    def forward(self, X, key_padding_mask=None, positions=None):
 
-        X = self.patch_embedder(X)
+        X = self.patch_embedder(X, positions)
         X = self.transformer_encoder(X, key_padding_mask)
 
         return X

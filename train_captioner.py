@@ -7,21 +7,18 @@ from tqdm import tqdm
 from paths import paths
 import torch
 from torch.optim import Adam
-from torchvision import transforms
+from image_transforms import image_transform_index
+from tokenizers import Tokenizer
 from coco_loader import get_coco_loader
 
-# Model Definition (my very own, in-house transformer implementation!!)
+# My very own, in-house transformer implementation!!
 from transformer_components import (
     TransformerEncoderDecoder,
     get_causal_mask,
 )
 from image_captioner import ImageEncoder, CaptionDecoder
 
-# =============================================================================
-# Section 1: Read in model and training configuration.
-# =============================================================================
-
-# Get checkpoint if passed in.
+# Parse arguments (just the checkpoint for now).
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "-c",
@@ -32,10 +29,15 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-os.makedirs(paths["checkpoint"], exist_ok=True)
+# =============================================================================
+# Section 1: Read in model and training configuration.
+# =============================================================================
+
+# Get checkpoint if passed in.
+os.makedirs(paths["captioner_checkpoint"], exist_ok=True)
 checkpoint = None
 if args.checkpoint is not None:
-    checkpoint_path = os.path.join(paths["checkpoint"], args.checkpoint)
+    checkpoint_path = os.path.join(paths["captioner_checkpoint"], args.checkpoint)
 
     if os.path.exists(checkpoint_path):
         checkpoint = torch.load(checkpoint_path, pickle_module=pickle)
@@ -44,20 +46,21 @@ if args.checkpoint is not None:
         sys.exit(1)
 
 # Get hyper-parameters.
-tokenizer_info = torch.load(paths["tokenizer_info"], weights_only=False)
+tokenizer = Tokenizer.from_file(paths["tokenizer"])
 with open(paths["config"], "r") as f:
     config = yaml.safe_load(f)
 
+PAD_IDX = tokenizer.token_to_id("<PAD>")
+
+VOCAB_SIZE = config["vocab_size"]
 EPOCHS = config["epochs"]
 BATCH_SIZE = config["batch_size"]
 NUM_WORKERS = config["num_workers"]
 CONTEXT_SIZE = config["context_size"]
 PATCH_SIZE = config["patch_size"]
 IMAGE_SIZE = config["image_size"]
-PAD_IDX = tokenizer_info["<PAD>"]
-VOCAB_SIZE = tokenizer_info["vocab_size"]
-transformer_encoder_config = config["transformer_encoder_config"]
-transformer_decoder_config = config["transformer_decoder_config"]
+transformer_encoder_config = config["transformer_encoder"]
+transformer_decoder_config = config["transformer_decoder"]
 
 # Set device.
 if "device" in config:
@@ -71,29 +74,32 @@ else:
 print(f"You are using {device}.")
 
 # =============================================================================
-# Section 2: Define images transforms and get dataloaders.
+# Section 2: Initialize training loop elements: model, optimizer, criterion,
+#            training history, and data loaders.
 # =============================================================================
 
-train_image_transform = transforms.Compose(
-    [
-        transforms.RandomResizedCrop(224, scale=(0.9, 1.0), ratio=(0.9, 1.1)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]
-)
+# Initialize model.
+model = TransformerEncoderDecoder(
+    ImageEncoder(IMAGE_SIZE, PATCH_SIZE, transformer_encoder_config),
+    CaptionDecoder(VOCAB_SIZE, CONTEXT_SIZE, transformer_decoder_config),
+).to(device)
 
-val_image_transform = transforms.Compose(
-    [
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ]
-)
+# Initialize optimizer and loss.
+optimizer = Adam(model.parameters(), 0.0001)
+criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
 
-image_transform_index = {"train": train_image_transform, "val": val_image_transform}
+# Initialize training history.
+train_losses = []
+val_losses = []
+epochs_completed = 0
+
+# Load all of the above (except criterion) from checkpoint if a checkpoint was passed in.
+if checkpoint is not None:
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    epochs_completed = checkpoint["epochs_completed"]
+    train_losses = checkpoint["train_losses"]
+    val_losses = checkpoint["val_losses"]
 
 # Get the dataloaders for train and val.
 coco_loaders = {}
@@ -113,29 +119,6 @@ for split in ["train", "val"]:
 # Section 3: Main training loop.
 # =============================================================================
 
-# Initialize model.
-model = TransformerEncoderDecoder(
-    ImageEncoder(IMAGE_SIZE, PATCH_SIZE, transformer_encoder_config),
-    CaptionDecoder(VOCAB_SIZE, CONTEXT_SIZE, transformer_decoder_config),
-).to(device)
-
-# Initialize optimizer and loss.
-optimizer = Adam(model.parameters(), 0.0001)
-criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
-
-# Initialize training history.
-train_losses = []
-val_losses = []
-epochs_completed = 0
-
-# Load all of the above from checkpoint if a checkpoint was passed in.
-if checkpoint is not None:
-    model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    epochs_completed = checkpoint["epochs_completed"]
-    train_losses = checkpoint["train_losses"]
-    val_losses = checkpoint["val_losses"]
-
 for epoch in range(epochs_completed, epochs_completed + EPOCHS):
 
     # Train
@@ -146,7 +129,11 @@ for epoch in range(epochs_completed, epochs_completed + EPOCHS):
     train_token_count = 0
 
     model.train()
+    cap = 30
     for img, caption in train_batches:
+        cap -= 1
+        if cap == 0:
+            break
 
         optimizer.zero_grad()
 
@@ -222,6 +209,6 @@ for epoch in range(epochs_completed, epochs_completed + EPOCHS):
         "val_losses": val_losses,
     }
     checkpoint_path = os.path.join(
-        paths["checkpoint"], f"checkpoint{epochs_completed}.pt"
+        paths["captioner_checkpoint"], f"checkpoint{epochs_completed}.pt"
     )
     torch.save(checkpoint, checkpoint_path)
