@@ -59,8 +59,8 @@ NUM_WORKERS = config["num_workers"]
 CONTEXT_SIZE = config["context_size"]
 PATCH_SIZE = config["patch_size"]
 IMAGE_SIZE = config["image_size"]
-transformer_encoder_config = config["transformer_encoder"]
-transformer_decoder_config = config["transformer_decoder"]
+image_encoder_config = config["image_encoder"]
+caption_decoder_config = config["caption_decoder"]
 
 # Set device.
 if "device" in config:
@@ -80,8 +80,8 @@ print(f"You are using {device}.")
 
 # Initialize model.
 model = TransformerEncoderDecoder(
-    ImageEncoder(IMAGE_SIZE, PATCH_SIZE, transformer_encoder_config),
-    CaptionDecoder(VOCAB_SIZE, CONTEXT_SIZE, transformer_decoder_config),
+    ImageEncoder(IMAGE_SIZE, PATCH_SIZE, image_encoder_config),
+    CaptionDecoder(VOCAB_SIZE, CONTEXT_SIZE, caption_decoder_config),
 ).to(device)
 
 # Initialize optimizer and loss.

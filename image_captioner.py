@@ -19,28 +19,29 @@ class PatchEmbedding(nn.Module):
         num_patches = (image_size // patch_size) ** 2
         self.pos_encoding = nn.Embedding(num_patches, hidden_size)
 
-    def forward(self, X, positions):
+    def forward(self, X, positions=None):
         X = self.image_to_patch_projections(X)
         X = X.flatten(-2, -1)
         X = X.transpose(1, 2)
         if positions is None:
             X = X + self.pos_encoding(torch.arange(X.shape[1], device=X.device))
         else:
-            X = X[:, positions, :] + self.pos_encoding(positions)
+            inds = positions.unsqueeze(-1).expand(-1, -1, X.shape[-1])
+            X = torch.gather(X, dim=1, index=inds) + self.pos_encoding(positions)
 
         return X
 
 
 class ImageEncoder(nn.Module):
 
-    def __init__(self, image_size, patch_size, transformer_encoder_config):
+    def __init__(self, image_size, patch_size, image_encoder_config):
         super().__init__()
 
         self.patch_embedder = PatchEmbedding(
-            transformer_encoder_config["hidden_size"], image_size, patch_size
+            image_encoder_config["hidden_size"], image_size, patch_size
         )
 
-        self.transformer_encoder = TransformerEncoder(**transformer_encoder_config)
+        self.transformer_encoder = TransformerEncoder(**image_encoder_config)
 
     def forward(self, X, key_padding_mask=None, positions=None):
 
@@ -50,29 +51,76 @@ class ImageEncoder(nn.Module):
         return X
 
 
-class CaptionDecoder(nn.Module):
+class ImageDecoder(nn.Module):
 
-    def __init__(self, vocab_size, context_size, transformer_decoder_config):
+    def __init__(self, patch_size, num_patches, image_decoder_config):
         super().__init__()
 
-        self.embedding = nn.Embedding(
-            vocab_size, transformer_decoder_config["hidden_size"]
-        )
+        self.patch_size = patch_size
+        self.num_patches = num_patches
+
         self.positional_encoding = nn.Embedding(
-            context_size, transformer_decoder_config["hidden_size"]
+            num_patches, image_decoder_config["hidden_size"]
+        )
+        self.masked_patch_token = nn.Parameter(
+            torch.zeros((1, 1, image_decoder_config["hidden_size"]))
+        )
+        nn.init.normal_(self.masked_patch_token)
+
+        self.transformer_decoder = TransformerEncoder(
+            **image_decoder_config
+        )  # It's actually an encoder, because no cross attention.
+
+        self.project = nn.Linear(
+            image_decoder_config["hidden_size"], 3 * patch_size * patch_size
+        )
+
+    def forward(self, unmasked_patch_tokens, positions):
+        # Initialize the decoder input to the masked patch token everywhere. Then fill in
+        # unmasked positions with their corresponding encoder output.
+        all_patch_tokens = torch.expand_copy(
+            self.masked_patch_token,
+            (unmasked_patch_tokens.shape[0], self.num_patches, -1),
+        )
+        inds = positions.unsqueeze(-1).expand(-1, -1, unmasked_patch_tokens.shape[-1])
+        all_patch_tokens.scatter_(1, inds, unmasked_patch_tokens)
+
+        X = all_patch_tokens + self.positional_encoding(
+            torch.arange(self.num_patches, device=unmasked_patch_tokens.device)
+        )
+        X = self.transformer_decoder(X, key_padding_mask=None)
+        X = self.project(X)
+
+        return X
+
+
+class ImageAutoEncoder(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+
+class CaptionDecoder(nn.Module):
+
+    def __init__(self, vocab_size, context_size, caption_decoder_config):
+        super().__init__()
+
+        self.embedding = nn.Embedding(vocab_size, caption_decoder_config["hidden_size"])
+        self.positional_encoding = nn.Embedding(
+            context_size, caption_decoder_config["hidden_size"]
         )
         self.project = nn.Linear(
-            transformer_decoder_config["hidden_size"],
+            caption_decoder_config["hidden_size"],
             vocab_size,
         )
-        self.transformer_decoder = TransformerDecoder(**transformer_decoder_config)
+        self.transformer_decoder = TransformerDecoder(**caption_decoder_config)
 
         # Store for generate function
-        self.key_size = transformer_decoder_config["key_size"]
-        self.value_size = transformer_decoder_config["value_size"]
-        self.num_heads = transformer_decoder_config["num_heads"]
+        self.key_size = caption_decoder_config["key_size"]
+        self.value_size = caption_decoder_config["value_size"]
+        self.num_heads = caption_decoder_config["num_heads"]
         self.vocab_size = vocab_size
-        self.stack_size = transformer_decoder_config["stack_size"]
+        self.stack_size = caption_decoder_config["stack_size"]
 
     def forward(
         self,

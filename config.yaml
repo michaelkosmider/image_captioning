@@ -3,7 +3,7 @@ patch_size: 16
 image_size: 224
 vocab_size: 5000
 
-transformer_encoder:
+image_encoder:
   stack_size: 6
   num_heads: 8
   hidden_size: 512
@@ -12,7 +12,16 @@ transformer_encoder:
   feedforward_size: 2048
   dropout: 0.1
 
-transformer_decoder:
+image_decoder:
+  stack_size: 4         
+  num_heads: 8          
+  hidden_size: 512      
+  key_size: 64
+  value_size: 64
+  feedforward_size: 1024 
+  dropout: 0.1
+
+caption_decoder:
   stack_size: 6
   num_heads: 8
   hidden_size: 512
@@ -23,4 +32,7 @@ transformer_decoder:
 
 batch_size: 128
 num_workers: 10 # Set according to your hardware
-epochs: 1 # Number of additional (not total) of epochs.
+captioner_epochs: 1 # Number of additional (not total) of epochs.
+image_encoder_epochs: 1
+
+masking_ratio: 0.75
