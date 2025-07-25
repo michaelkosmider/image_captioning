@@ -1,5 +1,5 @@
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from PIL import Image
 from torch.nn.utils.rnn import pad_sequence
 from paths import paths
@@ -50,12 +50,29 @@ def coco_collate_fn(batch, pad_idx, context_size):
     return images_batch, captions_batch
 
 
-def get_coco_loader(split, batch_size, context_size, transform, pad_idx, num_workers):
+def get_coco_loader(
+    split,
+    batch_size,
+    context_size,
+    transform,
+    pad_idx,
+    num_workers,
+    drop_last=False,
+    small=False,
+    small_frac=0.01,
+):
     dataset = CocoDataset(
         paths["images"][split],
         paths["captions_tokenized"][split],
         transform,
     )
+
+    # Prune dataset if small is True
+    if small:
+        num_samples = int(small_frac * len(dataset))
+        inds = torch.randperm(len(dataset))[:num_samples]
+        dataset = Subset(dataset, inds)
+
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -63,6 +80,7 @@ def get_coco_loader(split, batch_size, context_size, transform, pad_idx, num_wor
         collate_fn=partial(coco_collate_fn, pad_idx=pad_idx, context_size=context_size),
         num_workers=num_workers,
         pin_memory=True,
+        drop_last=drop_last,
     )
 
     return dataloader

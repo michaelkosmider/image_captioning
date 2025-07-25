@@ -33,6 +33,10 @@ caption_decoder:
 batch_size: 128
 num_workers: 10 # Set according to your hardware
 captioner_epochs: 1 # Number of additional (not total) of epochs.
-image_encoder_epochs: 1
+image_encoder_epochs: 2
 
 masking_ratio: 0.75
+auto_encoder_lr: 1e-4 
+auto_encoder_wd: 0.05
+
+captioner_lr: 1e-4

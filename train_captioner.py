@@ -18,7 +18,7 @@ from transformer_components import (
 )
 from image_captioner import ImageEncoder, CaptionDecoder
 
-# Parse arguments (just the checkpoint for now).
+# Parse arguments.
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "-c",
@@ -27,7 +27,18 @@ parser.add_argument(
     default=None,
     help="Path to checkpoint to resume training",
 )
+parser.add_argument(
+    "-p",
+    "--pretrained",
+    type=str,
+    default=None,
+    help="Path to pretrained ViT encoder",
+)
 args = parser.parse_args()
+if (args.checkpoint is not None) and (args.pretrained is not None):
+    print("Cannot train from checkpoint when pretrained is also passed in.")
+    sys.exit(1)
+
 
 # =============================================================================
 # Section 1: Read in model and training configuration.
@@ -45,6 +56,19 @@ if args.checkpoint is not None:
         print(f"The path {checkpoint_path} does not exist!")
         sys.exit(1)
 
+# Get image encoder state dict if passed in.
+image_encoder_state_dict = None
+if args.pretrained is not None:
+    pretrained_path = os.path.join(paths["encoder_checkpoint"], args.pretrained)
+
+    if os.path.exists(pretrained_path):
+        image_encoder_state_dict = torch.load(pretrained_path, pickle_module=pickle)[
+            "image_encoder_state_dict"
+        ]
+    else:
+        print(f"The path {pretrained_path} does not exist!")
+        sys.exit(1)
+
 # Get hyper-parameters.
 tokenizer = Tokenizer.from_file(paths["tokenizer"])
 with open(paths["config"], "r") as f:
@@ -59,6 +83,7 @@ NUM_WORKERS = config["num_workers"]
 CONTEXT_SIZE = config["context_size"]
 PATCH_SIZE = config["patch_size"]
 IMAGE_SIZE = config["image_size"]
+LEARNING_RATE = config["captioner_lr"]
 image_encoder_config = config["image_encoder"]
 caption_decoder_config = config["caption_decoder"]
 
@@ -74,7 +99,7 @@ else:
 print(f"You are using {device}.")
 
 # =============================================================================
-# Section 2: Initialize training loop elements: model, optimizer, criterion,
+# Section 2: Initialize training loop elements: model, optimizer, loss,
 #            training history, and data loaders.
 # =============================================================================
 
@@ -84,22 +109,28 @@ model = TransformerEncoderDecoder(
     CaptionDecoder(VOCAB_SIZE, CONTEXT_SIZE, caption_decoder_config),
 ).to(device)
 
-# Initialize optimizer and loss.
-optimizer = Adam(model.parameters(), 0.0001)
-criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
+# Initialize optimizer.
+optimizer = Adam(model.parameters(), LEARNING_RATE)
 
 # Initialize training history.
 train_losses = []
 val_losses = []
 epochs_completed = 0
 
-# Load all of the above (except criterion) from checkpoint if a checkpoint was passed in.
+# Load all of the above from checkpoint if a checkpoint was passed in.
 if checkpoint is not None:
     model.load_state_dict(checkpoint["model_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    epochs_completed = checkpoint["epochs_completed"]
     train_losses = checkpoint["train_losses"]
     val_losses = checkpoint["val_losses"]
+    epochs_completed = checkpoint["epochs_completed"]
+
+# If checkpoint was not passed in but encoder weights were, then load those into encoder.
+if image_encoder_state_dict is not None:
+    model.encoder.load_state_dict(image_encoder_state_dict)
+
+# Initialize loss.
+criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
 
 # Get the dataloaders for train and val.
 coco_loaders = {}
@@ -129,12 +160,7 @@ for epoch in range(epochs_completed, epochs_completed + EPOCHS):
     train_token_count = 0
 
     model.train()
-    cap = 30
     for img, caption in train_batches:
-        cap -= 1
-        if cap == 0:
-            break
-
         optimizer.zero_grad()
 
         img = img.to(device)

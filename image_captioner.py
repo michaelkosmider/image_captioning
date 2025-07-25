@@ -96,8 +96,22 @@ class ImageDecoder(nn.Module):
 
 class ImageAutoEncoder(nn.Module):
 
-    def __init__(self):
+    def __init__(self, ImageEncoder, ImageDecoder):
         super().__init__()
+
+        self.image_encoder = ImageEncoder
+        self.image_decoder = ImageDecoder
+
+    def forward(self, image, unmasked_positions):
+
+        encoded_unmasked_patches = self.image_encoder(
+            image, positions=unmasked_positions
+        )
+        reconstructed_image_patches = self.image_decoder(
+            encoded_unmasked_patches, positions=unmasked_positions
+        )
+
+        return reconstructed_image_patches
 
 
 class CaptionDecoder(nn.Module):

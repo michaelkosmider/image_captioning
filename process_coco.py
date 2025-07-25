@@ -23,7 +23,7 @@ def download_and_extract(url, output_dir, expected_name):
     os.makedirs(output_dir, exist_ok=True)
     extract_path = os.path.join(output_dir, expected_name)
 
-    # If zip already exists, skip download
+    # If unzip already exists, skip download
     if not os.path.exists(extract_path):
 
         zip_path = os.path.join(output_dir, "tmp")
@@ -57,7 +57,9 @@ download_and_extract(
 download_and_extract(
     "http://images.cocodataset.org/zips/val2017.zip", paths["data"], "val2017"
 )
-
+download_and_extract(
+    "http://images.cocodataset.org/zips/test2017.zip", paths["data"], "test2017"
+)
 # Annotations
 download_and_extract(
     "http://images.cocodataset.org/annotations/annotations_trainval2017.zip",
