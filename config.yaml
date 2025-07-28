@@ -4,18 +4,18 @@ image_size: 224
 vocab_size: 5000
 
 image_encoder:
-  stack_size: 6
-  num_heads: 8
-  hidden_size: 512
+  stack_size: 12
+  num_heads: 12
+  hidden_size: 768
   key_size: 64
   value_size: 64
-  feedforward_size: 2048
+  feedforward_size: 3072
   dropout: 0.1
 
 image_decoder:
   stack_size: 4         
   num_heads: 8          
-  hidden_size: 512      
+  hidden_size: 768     
   key_size: 64
   value_size: 64
   feedforward_size: 1024 
@@ -23,20 +23,29 @@ image_decoder:
 
 caption_decoder:
   stack_size: 6
-  num_heads: 8
-  hidden_size: 512
+  num_heads: 12
+  hidden_size: 768
   key_size: 64
   value_size: 64
-  feedforward_size: 2048
+  feedforward_size: 3072
   dropout: 0.1
 
+# Data loader
 batch_size: 128
 num_workers: 10 # Set according to your hardware
-captioner_epochs: 1 # Number of additional (not total) of epochs.
-image_encoder_epochs: 2
 
+# Encoder training
+total_image_encoder_epochs: 40
+cur_image_encoder_epochs: 5 # The number of epochs for the next compute.
+auto_encoder_warmup_epochs: 5
 masking_ratio: 0.75
-auto_encoder_lr: 1e-4 
+auto_encoder_lr: 1e-4
+auto_encoder_start_factor: 0.01
+auto_encoder_eta_min: 1e-6
 auto_encoder_wd: 0.05
 
+# Captioner training
+total_captioner_epochs: 30
+cur_captioner_epochs: 1
 captioner_lr: 1e-4
+captioner_wd: 0.05

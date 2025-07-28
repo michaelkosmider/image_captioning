@@ -6,10 +6,11 @@ import yaml
 from tqdm import tqdm
 from paths import paths
 import torch
-from torch.optim import Adam
+from torch.optim import AdamW
 from image_transforms import image_transform_index
 from tokenizers import Tokenizer
 from coco_loader import get_coco_loader
+from torch.amp import autocast, GradScaler
 
 # My very own, in-house transformer implementation!!
 from transformer_components import (
@@ -32,7 +33,7 @@ parser.add_argument(
     "--pretrained",
     type=str,
     default=None,
-    help="Path to pretrained ViT encoder",
+    help="Path to pretrained ViT encoder checkpoint",
 )
 args = parser.parse_args()
 if (args.checkpoint is not None) and (args.pretrained is not None):
@@ -77,13 +78,14 @@ with open(paths["config"], "r") as f:
 PAD_IDX = tokenizer.token_to_id("<PAD>")
 
 VOCAB_SIZE = config["vocab_size"]
-EPOCHS = config["epochs"]
+EPOCHS = int(config["captioner_epochs"])
 BATCH_SIZE = config["batch_size"]
 NUM_WORKERS = config["num_workers"]
 CONTEXT_SIZE = config["context_size"]
 PATCH_SIZE = config["patch_size"]
 IMAGE_SIZE = config["image_size"]
-LEARNING_RATE = config["captioner_lr"]
+LEARNING_RATE = float(config["captioner_lr"])
+WEIGHT_DECAY = float(config["captioner_wd"])
 image_encoder_config = config["image_encoder"]
 caption_decoder_config = config["caption_decoder"]
 
@@ -110,7 +112,11 @@ model = TransformerEncoderDecoder(
 ).to(device)
 
 # Initialize optimizer.
-optimizer = Adam(model.parameters(), LEARNING_RATE)
+optimizer = AdamW(
+    model.parameters(),
+    lr=LEARNING_RATE,
+    weight_decay=WEIGHT_DECAY,
+)
 
 # Initialize training history.
 train_losses = []
@@ -128,6 +134,7 @@ if checkpoint is not None:
 # If checkpoint was not passed in but encoder weights were, then load those into encoder.
 if image_encoder_state_dict is not None:
     model.encoder.load_state_dict(image_encoder_state_dict)
+    print(f"Loading in encoder weights from checkpoint at {pretrained_path}")
 
 # Initialize loss.
 criterion = torch.nn.CrossEntropyLoss(ignore_index=PAD_IDX)
@@ -146,6 +153,7 @@ for split in ["train", "val"]:
         NUM_WORKERS,
     )
 
+scaler = GradScaler(device=device)  # tmp
 # =============================================================================
 # Section 3: Main training loop.
 # =============================================================================
@@ -169,22 +177,24 @@ for epoch in range(epochs_completed, epochs_completed + EPOCHS):
         labels = caption[:, 1:]
         caption_in = caption[:, :-1]
 
-        logits = model(
-            caption_in,
-            img,
-            tgt_mask=get_causal_mask(caption_in.shape[1], device=device),
-            tgt_key_padding_mask=(caption_in == PAD_IDX),
-            src_key_padding_mask=None,
-        )
+        with autocast(device_type=device):
+            logits = model(
+                caption_in,
+                img,
+                tgt_mask=get_causal_mask(caption_in.shape[1], device=device),
+                tgt_key_padding_mask=(caption_in == PAD_IDX),
+                src_key_padding_mask=None,
+            )
 
-        loss = criterion(logits.reshape(-1, VOCAB_SIZE), labels.reshape(-1))
+            loss = criterion(logits.reshape(-1, VOCAB_SIZE), labels.reshape(-1))
 
         batch_token_count = torch.sum(labels != PAD_IDX).item()
         train_token_count += batch_token_count
         train_loss += loss.item() * batch_token_count
 
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         train_batches.set_postfix({"loss": loss.item()})
 

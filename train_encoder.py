@@ -5,12 +5,15 @@ import yaml
 import torch
 import torch.nn as nn
 from torch.optim import AdamW
+from torch.optim.lr_scheduler import CosineAnnealingLR, SequentialLR, LinearLR
 from image_transforms import image_transform_index
 from tqdm import tqdm
 import os
 import argparse
 import pickle
 import sys
+from torch.amp import autocast, GradScaler
+
 
 # Parse arguments (just the checkpoint for now).
 parser = argparse.ArgumentParser()
@@ -48,11 +51,19 @@ PATCH_SIZE = config["patch_size"]
 MASKING_RATIO = config["masking_ratio"]
 NUM_PATCHES = (IMAGE_SIZE // PATCH_SIZE) ** 2
 NUM_MASKED_PATCHES = int(NUM_PATCHES * MASKING_RATIO)
-NUM_WORKERS = config["num_workers"]
+NUM_WORKERS = config[
+    "num_workers"
+]  # Not actually a hyperparameter, but affects training time.
 BATCH_SIZE = config["batch_size"]
-EPOCHS = config["image_encoder_epochs"]
+
+TOTAL_EPOCHS = config["total_image_encoder_epochs"]
+CUR_EPOCHS = config["cur_image_encoder_epochs"]
 LEARNING_RATE = float(config["auto_encoder_lr"])
+START_FACTOR = float(config["auto_encoder_start_factor"])
+WARMUP_EPOCHS = int(config["auto_encoder_warmup_epochs"])
+ETA_MIN = float(config["auto_encoder_eta_min"])
 WEIGHT_DECAY = float(config["auto_encoder_wd"])
+
 image_encoder_config = config["image_encoder"]
 image_decoder_config = config["image_decoder"]
 
@@ -79,26 +90,42 @@ model = ImageAutoEncoder(
     ImageDecoder(PATCH_SIZE, NUM_PATCHES, image_decoder_config),
 ).to(device)
 
-# Initialize optimizer.
+# Initialize optimizer and scheduler.
 optimizer = AdamW(
     model.parameters(),
     lr=LEARNING_RATE,
     weight_decay=WEIGHT_DECAY,
 )
 
+warmup = LinearLR(
+    optimizer,
+    start_factor=START_FACTOR,
+    end_factor=1,
+    total_iters=WARMUP_EPOCHS,
+)
+cosine = CosineAnnealingLR(
+    optimizer, T_max=TOTAL_EPOCHS - WARMUP_EPOCHS, eta_min=ETA_MIN
+)
+scheduler = SequentialLR(
+    optimizer,
+    schedulers=[warmup, cosine],
+    milestones=[WARMUP_EPOCHS],
+)
+
+# Initialize grad scaler (helpful as we are using mixed precision training).
+scaler = GradScaler(device=device)
+
 # Initialize training history.
-train_losses = []
-val_losses = []
-epochs_completed = 0
+history = {"train_losses": [], "val_losses": [], "epochs_completed": 0}
 
 # Load all of the above from checkpoint if a checkpoint was passed in.
 if checkpoint is not None:
     model.image_encoder.load_state_dict(checkpoint["image_encoder_state_dict"])
     model.image_decoder.load_state_dict(checkpoint["image_decoder_state_dict"])
     optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    train_losses = checkpoint["train_losses"]
-    val_losses = checkpoint["val_losses"]
-    epochs_completed = checkpoint["epochs_completed"]
+    scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+    scaler.load_state_dict(checkpoint["scaler_state_dict"])
+    history = checkpoint["history"]
 
 # Initialize loss.
 criterion = nn.MSELoss()
@@ -118,11 +145,14 @@ for split in ["train", "val"]:
         drop_last=True,
     )
 
+
 # =============================================================================
 # Section 3: Main training loop.
 # =============================================================================
 
-for epoch in range(epochs_completed, epochs_completed + EPOCHS):
+for epoch in range(
+    history["epochs_completed"], history["epochs_completed"] + CUR_EPOCHS
+):
     # Train
 
     train_batches = tqdm(
@@ -147,28 +177,37 @@ for epoch in range(epochs_completed, epochs_completed + EPOCHS):
         masked_positions = positions[:, :NUM_MASKED_PATCHES]
         unmasked_positions = positions[:, NUM_MASKED_PATCHES:]
 
-        # Create labels
-        image_patches = patch_extracter(image).transpose(-1, -2)
-        ground_inds = masked_positions.unsqueeze(-1).expand(
-            -1, -1, image_patches.shape[-1]
-        )
-        ground_masked_patches = torch.gather(image_patches, dim=1, index=ground_inds)
+        with autocast(device_type=device):
+            # Create labels
+            image_patches = patch_extracter(image).transpose(-1, -2)
+            ground_inds = masked_positions.unsqueeze(-1).expand(
+                -1, -1, image_patches.shape[-1]
+            )
+            ground_masked_patches = torch.gather(
+                image_patches, dim=1, index=ground_inds
+            )
 
-        # Get predictions
-        reconstructed_image_patches = model(image, unmasked_positions)
-        pred_masked_patches = torch.gather(
-            reconstructed_image_patches, dim=1, index=ground_inds
-        )
+            # Get predictions
+            reconstructed_image_patches = model(image, unmasked_positions)
+            pred_masked_patches = torch.gather(
+                reconstructed_image_patches, dim=1, index=ground_inds
+            )
 
-        # Compute loss and update weights
-        loss = criterion(pred_masked_patches, ground_masked_patches)
-        loss.backward()
-        optimizer.step()
+            # Compute loss and update weights
+            loss = criterion(pred_masked_patches, ground_masked_patches)
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         train_loss += loss.item()
-        train_batches.set_postfix({"loss": loss.item()})
+        train_batches.set_postfix(
+            {"loss": loss.item(), "LR": scheduler.get_last_lr()[0]}
+        )
 
-    train_losses.append(train_loss / len(train_batches))
+    scheduler.step()
+
+    history["train_losses"].append(train_loss / len(train_batches))
 
     # Validate
     with torch.no_grad():
@@ -213,19 +252,19 @@ for epoch in range(epochs_completed, epochs_completed + EPOCHS):
             val_loss += loss.item()
             val_batches.set_postfix({"loss": loss.item()})
 
-        val_losses.append(val_loss / len(val_batches))
+        history["val_losses"].append(val_loss / len(val_batches))
+    history["epochs_completed"] += 1
 
     # Checkpoint
-    epochs_completed += 1
     checkpoint = {
         "image_encoder_state_dict": model.image_encoder.state_dict(),
         "image_decoder_state_dict": model.image_decoder.state_dict(),
         "optimizer_state_dict": optimizer.state_dict(),
-        "epochs_completed": epochs_completed,
-        "train_losses": train_losses,
-        "val_losses": val_losses,
+        "scheduler_state_dict": scheduler.state_dict(),
+        "scaler_state_dict": scaler.state_dict(),
+        "history": history,
     }
     checkpoint_path = os.path.join(
-        paths["encoder_checkpoint"], f"checkpoint{epochs_completed}.pt"
+        paths["encoder_checkpoint"], f"checkpoint{history["epochs_completed"]}.pt"
     )
     torch.save(checkpoint, checkpoint_path)
