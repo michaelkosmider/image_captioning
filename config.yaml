@@ -4,7 +4,7 @@ image_size: 224
 vocab_size: 5000
 
 image_encoder:
-  stack_size: 12
+  stack_size: 14
   num_heads: 12
   hidden_size: 768
   key_size: 64
@@ -35,12 +35,12 @@ batch_size: 128
 num_workers: 10 # Set according to your hardware
 
 # Encoder training
-total_image_encoder_epochs: 40
+total_image_encoder_epochs: 90
 cur_image_encoder_epochs: 5 # The number of epochs for the next compute.
-auto_encoder_warmup_epochs: 5
+auto_encoder_warmup_epochs: 8
 masking_ratio: 0.75
-auto_encoder_lr: 1e-4
-auto_encoder_start_factor: 0.01
+auto_encoder_lr: 8e-5
+auto_encoder_start_factor: 0.05
 auto_encoder_eta_min: 1e-6
 auto_encoder_wd: 0.05
 
@@ -48,4 +48,8 @@ auto_encoder_wd: 0.05
 total_captioner_epochs: 30
 cur_captioner_epochs: 1
 captioner_lr: 1e-4
+auto_encoder_start_factor: 0.05
+auto_encoder_eta_min: 1e-6
 captioner_wd: 0.05
+label_smoothing: 0.01
+eval_freq: 1

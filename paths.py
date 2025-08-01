@@ -22,6 +22,14 @@ captions_tokenized = {
     "train": os.path.join(ANNOTATIONS_DIR, "train_tokenized.pt"),
     "val": os.path.join(ANNOTATIONS_DIR, "val_tokenized.pt"),
 }
+image_to_captions = {
+    "train": os.path.join(ANNOTATIONS_DIR, "train_im2capts.pt"),
+    "val": os.path.join(ANNOTATIONS_DIR, "val_im2capts.pt"),
+}
+image_ids = {
+    "train": os.path.join(ANNOTATIONS_DIR, "train_image_ids.pt"),
+    "val": os.path.join(ANNOTATIONS_DIR, "val_image_ids.pt"),
+}
 
 paths = {
     "data": DATA_DIR,
@@ -33,4 +41,6 @@ paths = {
     "images": images,
     "captions": captions,
     "captions_tokenized": captions_tokenized,
+    "image_to_captions": image_to_captions,
+    "image_ids": image_ids,
 }

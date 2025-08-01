@@ -15,7 +15,7 @@ import sys
 from torch.amp import autocast, GradScaler
 
 
-# Parse arguments (just the checkpoint for now).
+# Parse arguments
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "-c",
@@ -42,7 +42,7 @@ if args.checkpoint is not None:
         print(f"The path {checkpoint_path} does not exist!")
         sys.exit(1)
 
-# Get hyper-parameters.
+# Get hyper-parameters and training parameters.
 with open(paths["config"]) as f:
     config = yaml.safe_load(f)
 
@@ -51,16 +51,13 @@ PATCH_SIZE = config["patch_size"]
 MASKING_RATIO = config["masking_ratio"]
 NUM_PATCHES = (IMAGE_SIZE // PATCH_SIZE) ** 2
 NUM_MASKED_PATCHES = int(NUM_PATCHES * MASKING_RATIO)
-NUM_WORKERS = config[
-    "num_workers"
-]  # Not actually a hyperparameter, but affects training time.
+NUM_WORKERS = config["num_workers"]
 BATCH_SIZE = config["batch_size"]
-
-TOTAL_EPOCHS = config["total_image_encoder_epochs"]
-CUR_EPOCHS = config["cur_image_encoder_epochs"]
+TOTAL_EPOCHS = int(config["total_image_encoder_epochs"])
+CUR_EPOCHS = int(config["cur_image_encoder_epochs"])
+WARMUP_EPOCHS = int(config["auto_encoder_warmup_epochs"])
 LEARNING_RATE = float(config["auto_encoder_lr"])
 START_FACTOR = float(config["auto_encoder_start_factor"])
-WARMUP_EPOCHS = int(config["auto_encoder_warmup_epochs"])
 ETA_MIN = float(config["auto_encoder_eta_min"])
 WEIGHT_DECAY = float(config["auto_encoder_wd"])
 
@@ -80,8 +77,8 @@ else:
 print(f"You are using {device}.")
 
 # =============================================================================
-# Section 2: Initialize training loop elements: model, optimizer, loss,
-#            training history, and data loaders.
+# Section 2: Initialize training loop elements: model, optimizer, scheduler,
+#            scaler, training history, loss, and data loaders.
 # =============================================================================
 
 # Initialize model.
@@ -98,10 +95,7 @@ optimizer = AdamW(
 )
 
 warmup = LinearLR(
-    optimizer,
-    start_factor=START_FACTOR,
-    end_factor=1,
-    total_iters=WARMUP_EPOCHS,
+    optimizer, start_factor=START_FACTOR, end_factor=1, total_iters=WARMUP_EPOCHS
 )
 cosine = CosineAnnealingLR(
     optimizer, T_max=TOTAL_EPOCHS - WARMUP_EPOCHS, eta_min=ETA_MIN
@@ -138,11 +132,10 @@ for split in ["train", "val"]:
     coco_loaders[split] = get_coco_loader(
         split,
         BATCH_SIZE,
-        2,  # This doesn't matter since captions won't be used.
         image_transform_index[split],
-        0,
         NUM_WORKERS,
         drop_last=True,
+        mode="image_only",
     )
 
 
@@ -154,14 +147,13 @@ for epoch in range(
     history["epochs_completed"], history["epochs_completed"] + CUR_EPOCHS
 ):
     # Train
-
     train_batches = tqdm(
         coco_loaders["train"], desc=f"Training epoch {epoch+1}:", leave=True
     )
     train_loss = 0
 
     model.train()
-    for image, _ in train_batches:
+    for image in train_batches:
         optimizer.zero_grad()
 
         image = image.to(device)
@@ -217,7 +209,7 @@ for epoch in range(
         val_loss = 0
 
         model.eval()
-        for image, _ in val_batches:
+        for image in val_batches:
             image = image.to(device)
             positions = torch.randint(
                 0,
@@ -253,9 +245,9 @@ for epoch in range(
             val_batches.set_postfix({"loss": loss.item()})
 
         history["val_losses"].append(val_loss / len(val_batches))
-    history["epochs_completed"] += 1
 
     # Checkpoint
+    history["epochs_completed"] += 1
     checkpoint = {
         "image_encoder_state_dict": model.image_encoder.state_dict(),
         "image_decoder_state_dict": model.image_decoder.state_dict(),

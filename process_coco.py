@@ -1,6 +1,7 @@
 import torch
 import os
 from paths import paths
+from collections import defaultdict
 
 # Data processing
 import json
@@ -109,15 +110,20 @@ else:
     tokenizer.save(paths["tokenizer"])
 
 # =============================================================================
-# Section 3: Tokenize all captions.
+# Section 3: Tokenize all captions. Save three data structures: a list of
+# captions with image id, a dict of image ids to all 5 captions, and an
+# iterable over image ids.
 # =============================================================================
 
+# TODO: not very fault tolerant.
 for split in ["train", "val"]:
     if not os.path.exists(paths["captions_tokenized"][split]):
 
         with open(paths["captions"][split], "r") as f:
             annotations = json.load(f)["annotations"]
+
             annotations_tokenized = []
+            image_to_captions = defaultdict(list)
 
             for annotation in annotations:
                 caption_ids = (
@@ -129,5 +135,10 @@ for split in ["train", "val"]:
                 annotation_tokenized = {"caption": caption_ids, "image_id": image_id}
 
                 annotations_tokenized.append(annotation_tokenized)
+                image_to_captions[image_id].append(caption_ids)
 
             torch.save(annotations_tokenized, paths["captions_tokenized"][split])
+            torch.save(
+                list(image_to_captions.items()), paths["image_to_captions"][split]
+            )
+            torch.save(list(image_to_captions.keys()), paths["image_ids"][split])
