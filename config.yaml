@@ -46,10 +46,15 @@ auto_encoder_wd: 0.05
 
 # Captioner training
 total_captioner_epochs: 30
-cur_captioner_epochs: 1
+cur_captioner_epochs: 5
+captioner_warmup_epochs: 2
 captioner_lr: 1e-4
-auto_encoder_start_factor: 0.05
-auto_encoder_eta_min: 1e-6
+captioner_start_factor: 0.05
+captioner_eta_min: 1e-6
 captioner_wd: 0.05
 label_smoothing: 0.01
 eval_freq: 1
+
+# Generation for metrics
+num_beams: 6
+length_alpha: 0.8

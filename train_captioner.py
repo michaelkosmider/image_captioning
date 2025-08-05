@@ -10,8 +10,9 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
 from image_transforms import image_transform_index
 from tokenizers import Tokenizer
-from coco_loader import get_coco_loader
+from coco_loader import get_coco_loader, decode_predictions
 from torch.amp import autocast, GradScaler
+import evaluate
 
 # My very own, in-house transformer implementation!!
 from transformer_components import (
@@ -22,11 +23,8 @@ from image_captioner import ImageEncoder, CaptionDecoder
 
 # TODO
 # unfreeze encoder
-# add warmup and cosine sched
-# label smoothing
 # val metrics
-# image loader for val
-# resolve: captioner epoch actually sees each image 5 times.
+
 
 # Parse arguments.
 parser = argparse.ArgumentParser()
@@ -90,6 +88,8 @@ tokenizer = Tokenizer.from_file(paths["tokenizer"])
 with open(paths["config"], "r") as f:
     config = yaml.safe_load(f)
 
+SOS_IDX = tokenizer.token_to_id("<SOS>")
+EOS_IDX = tokenizer.token_to_id("<EOS>")
 PAD_IDX = tokenizer.token_to_id("<PAD>")
 
 BATCH_SIZE = config["batch_size"]
@@ -101,15 +101,18 @@ PATCH_SIZE = config["patch_size"]
 IMAGE_SIZE = config["image_size"]
 
 EVAL_FREQ = config["eval_freq"]
-TOTAL_EPOCHS = config["total_image_encoder_epochs"]
-CUR_EPOCHS = config["cur_image_encoder_epochs"]
-WARMUP_EPOCHS = int(config["auto_encoder_warmup_epochs"])
+TOTAL_EPOCHS = config["total_captioner_epochs"]
+CUR_EPOCHS = config["cur_captioner_epochs"]
+WARMUP_EPOCHS = int(config["captioner_warmup_epochs"])
 
-START_FACTOR = float(config["auto_encoder_start_factor"])
+START_FACTOR = float(config["captioner_start_factor"])
 LEARNING_RATE = float(config["captioner_lr"])
-ETA_MIN = float(config["auto_encoder_eta_min"])
+ETA_MIN = float(config["captioner_eta_min"])
 WEIGHT_DECAY = float(config["captioner_wd"])
 LABEL_SMOOTHING = float(config["label_smoothing"])
+
+LENGTH_ALPHA = float(config["length_alpha"])
+NUM_BEAMS = config["num_beams"]
 
 image_encoder_config = config["image_encoder"]
 caption_decoder_config = config["caption_decoder"]
@@ -207,6 +210,17 @@ for split in ["train", "val"]:
         small_frac=args.small if args.small is not None else None,
     )
 
+loader_for_metrics = get_coco_loader(
+    "val",
+    BATCH_SIZE,
+    image_transform_index["val"],
+    NUM_WORKERS,
+    mode="image_first",
+    drop_last=True,
+)
+
+# Get metrics for evaluation.
+bleu = evaluate.load("bleu")
 
 # =============================================================================
 # Section 3: Main training loop.
@@ -294,9 +308,49 @@ for epoch in range(
 
         history["val_losses"].append(val_loss / val_token_count)
 
-    # Evaluate metrics
-    if epoch % EVAL_FREQ == 0:
-        pass
+    # # Evaluate metrics
+    # if epoch % EVAL_FREQ == 0:
+    #     model.eval()
+    #     with torch.no_grad():
+    #         metric_batches = tqdm(
+    #             loader_for_metrics, desc=f"Metrics for epoch {epoch+1}:", leave=True
+    #         )
+    #         all_preds, all_refs = [], []
+    #         for img, references in metric_batches:
+    #             img = img.to(device)
+
+    #             # Get and decode predictions.
+    #             predictions = model.generate(
+    #                 img,
+    #                 None,
+    #                 NUM_BEAMS,
+    #                 CONTEXT_SIZE,
+    #                 LENGTH_ALPHA,
+    #                 SOS_IDX,
+    #                 PAD_IDX,
+    #                 EOS_IDX,
+    #             )
+    #             decoded_predictions = decode_predictions(predictions, tokenizer)
+    #             all_preds.extend(decoded_predictions)
+
+    #             # Decode references.
+    #             for ref_group in references:
+    #                 decoded = tokenizer.decode_batch(
+    #                     ref_group, skip_special_tokens=True
+    #                 )
+    #                 all_refs.append(decoded)
+
+    #         cleaned_preds, cleaned_refs = [], []
+    #         for pred, refs in zip(all_preds, all_refs):
+    #             if not pred.strip():
+    #                 continue
+    #             cleaned_preds.append(pred)
+    #             cleaned_refs.append(refs)
+    #         # Compute BLEU
+    #         bleu_score = bleu.compute(
+    #             predictions=cleaned_preds, references=cleaned_refs
+    #         )
+    #         history["bleu_scores"][epoch] = bleu_score
 
     # Checkpoint
     history["epochs_completed"] += 1

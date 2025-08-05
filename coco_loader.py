@@ -55,7 +55,7 @@ class ImgFirstDataset(Dataset):
         image = Image.open(image_path).convert("RGB")
         image_transformed = self.image_transform(image)
 
-        return image_transformed, captions
+        return image_transformed, captions, image_id
 
 
 class ImageOnlyDataset(Dataset):
@@ -81,7 +81,13 @@ class ImageOnlyDataset(Dataset):
         return image_transformed
 
 
-def coco_collate_fn(batch, pad_idx, context_size):
+def image_first_collate_fn(batch):
+    images, captions, image_ids = zip(*batch)
+    images = torch.stack(images, dim=0)
+    return images, list(captions), list(image_ids)
+
+
+def caption_first_collate_fn(batch, pad_idx, context_size):
 
     images = []
     captions = []
@@ -140,9 +146,11 @@ def get_coco_loader(
         batch_size=batch_size,
         shuffle=(True if split == "train" else False),
         collate_fn=(
-            partial(coco_collate_fn, pad_idx=pad_idx, context_size=context_size)
+            partial(
+                caption_first_collate_fn, pad_idx=pad_idx, context_size=context_size
+            )
             if mode == "caption_first"
-            else None
+            else image_first_collate_fn if mode == "image_first" else None
         ),
         num_workers=num_workers,
         pin_memory=True,
@@ -150,3 +158,19 @@ def get_coco_loader(
     )
 
     return dataloader
+
+
+def decode_predictions(preds, tokenizer):
+
+    clean_preds = []
+    for pred in preds:
+        tokens = []
+        for token in pred:
+            if token == tokenizer.token_to_id("<EOS>"):
+                break
+            if token != tokenizer.token_to_id("<PAD>"):
+                tokens.append(token.item())
+        clean_preds.append(tokens)
+
+    generated_texts = tokenizer.decode_batch(clean_preds, skip_special_tokens=True)
+    return generated_texts
