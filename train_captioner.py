@@ -14,6 +14,8 @@ from coco_loader import get_coco_loader, decode_predictions
 from torch.amp import autocast, GradScaler
 import evaluate
 
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 # My very own, in-house transformer implementation!!
 from transformer_components import (
     TransformerEncoderDecoder,
@@ -22,8 +24,8 @@ from transformer_components import (
 from image_captioner import ImageEncoder, CaptionDecoder
 
 # TODO
+# unhardcode freeze blocks
 # unfreeze encoder
-# val metrics
 
 
 # Parse arguments.
@@ -130,7 +132,7 @@ print(f"You are using {device}.")
 
 # =============================================================================
 # Section 2: Initialize training loop elements: model, optimizer, loss,
-#            training history, and data loaders.
+#            training history, and data loaders. Also metrics (BLEU).
 # =============================================================================
 
 # Initialize model.
@@ -138,25 +140,6 @@ model = TransformerEncoderDecoder(
     ImageEncoder(IMAGE_SIZE, PATCH_SIZE, image_encoder_config),
     CaptionDecoder(VOCAB_SIZE, CONTEXT_SIZE, caption_decoder_config),
 ).to(device)
-
-# Initialize optimizer and scheduler.
-optimizer = AdamW(
-    model.parameters(),
-    lr=LEARNING_RATE,
-    weight_decay=WEIGHT_DECAY,
-)
-
-warmup = LinearLR(
-    optimizer, start_factor=START_FACTOR, end_factor=1, total_iters=WARMUP_EPOCHS
-)
-cosine = CosineAnnealingLR(
-    optimizer, T_max=TOTAL_EPOCHS - WARMUP_EPOCHS, eta_min=ETA_MIN
-)
-scheduler = SequentialLR(
-    optimizer,
-    schedulers=[warmup, cosine],
-    milestones=[WARMUP_EPOCHS],
-)
 
 # Initialize grad scaler (helpful as we are using mixed precision training).
 scaler = GradScaler(device=device)
@@ -167,15 +150,13 @@ history = {
     "val_losses": [],
     "epochs_completed": 0,
     "bleu_scores": {},
-    "cider_scores": {},
+    "learning_rates": {},
 }
 
 # Load all of the above from checkpoint if a checkpoint was passed in.
 if checkpoint is not None:
     print(f"Starting from checkpoint at {checkpoint_path}")
     model.load_state_dict(checkpoint["model_state_dict"])
-    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-    scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
     scaler.load_state_dict(checkpoint["scaler_state_dict"])
     history = checkpoint["history"]
 
@@ -184,9 +165,67 @@ elif image_encoder_state_dict is not None:
     model.encoder.load_state_dict(image_encoder_state_dict)
     print(f"Loading in encoder weights from checkpoint at {pretrained_path}")
 
+# Neither a checkpoint nor encoder weights were passed in.
 else:
     print(
         "Starting training from scratch. Did you forget to pass in a checkpoint or backbone?"
+    )
+
+# Initialize optimizer.
+patcher_params = model.encoder.patch_embedder.parameters()
+encoder_bottom_params = []
+for module in model.encoder.transformer_encoder.encoder_stack[:7]:
+    encoder_bottom_params.extend(module.parameters())
+encoder_top_params = []
+for module in model.encoder.transformer_encoder.encoder_stack[7:]:
+    encoder_top_params.extend(module.parameters())
+
+param_groups = [
+    {"params": patcher_params, "lr": LEARNING_RATE * 0.001},
+    {
+        "params": encoder_bottom_params,
+        "lr": LEARNING_RATE * 0.01,
+    },
+    {
+        "params": encoder_top_params,
+        "lr": LEARNING_RATE * 0.1,
+    },
+    {"params": model.decoder.parameters(), "lr": LEARNING_RATE},
+]
+
+optimizer = AdamW(
+    param_groups,
+    lr=LEARNING_RATE,
+    weight_decay=WEIGHT_DECAY,
+)
+if checkpoint is not None:
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+
+# Intialize scheduler.
+if checkpoint is not None:
+    if history["epochs_completed"] == WARMUP_EPOCHS:
+        # Switch to the cosine scheduler now that warmups are done.
+        scheduler = CosineAnnealingLR(
+            optimizer, T_max=TOTAL_EPOCHS - WARMUP_EPOCHS, eta_min=ETA_MIN
+        )
+    elif history["epochs_completed"] < WARMUP_EPOCHS:
+        # Restore warmup schedule since warmups are not done.
+        scheduler = LinearLR(
+            optimizer,
+            start_factor=START_FACTOR,
+            end_factor=1,
+            total_iters=WARMUP_EPOCHS,
+        )
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+    else:
+        # Restore cosine schedule as we are past warmup.
+        scheduler = CosineAnnealingLR(
+            optimizer, T_max=TOTAL_EPOCHS - WARMUP_EPOCHS, eta_min=ETA_MIN
+        )
+        scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+else:
+    scheduler = LinearLR(
+        optimizer, start_factor=START_FACTOR, end_factor=1, total_iters=WARMUP_EPOCHS
     )
 
 # Initialize loss.
@@ -211,12 +250,7 @@ for split in ["train", "val"]:
     )
 
 loader_for_metrics = get_coco_loader(
-    "val",
-    BATCH_SIZE,
-    image_transform_index["val"],
-    NUM_WORKERS,
-    mode="image_first",
-    drop_last=True,
+    "val", BATCH_SIZE, image_transform_index["val"], NUM_WORKERS, mode="image_first"
 )
 
 # Get metrics for evaluation.
@@ -229,6 +263,12 @@ bleu = evaluate.load("bleu")
 for epoch in range(
     history["epochs_completed"], history["epochs_completed"] + CUR_EPOCHS
 ):
+
+    if epoch == WARMUP_EPOCHS:
+        print("Switching schedule to cosine annealing!")
+        scheduler = CosineAnnealingLR(
+            optimizer, T_max=TOTAL_EPOCHS - WARMUP_EPOCHS, eta_min=ETA_MIN
+        )
 
     # Train
     train_batches = tqdm(
@@ -266,13 +306,12 @@ for epoch in range(
         scaler.update()
 
         train_loss += loss.item() * batch_token_count
-        train_batches.set_postfix(
-            {"loss": loss.item(), "LR": scheduler.get_last_lr()[0]}
-        )
+        train_batches.set_postfix({"loss": loss.item(), "LR": scheduler.get_last_lr()})
+
+    history["learning_rates"][epoch] = list(scheduler.get_last_lr())
+    history["train_losses"].append(train_loss / train_token_count)
 
     scheduler.step()
-
-    history["train_losses"].append(train_loss / train_token_count)
 
     # Validate
     with torch.no_grad():
@@ -308,49 +347,51 @@ for epoch in range(
 
         history["val_losses"].append(val_loss / val_token_count)
 
-    # # Evaluate metrics
-    # if epoch % EVAL_FREQ == 0:
-    #     model.eval()
-    #     with torch.no_grad():
-    #         metric_batches = tqdm(
-    #             loader_for_metrics, desc=f"Metrics for epoch {epoch+1}:", leave=True
-    #         )
-    #         all_preds, all_refs = [], []
-    #         for img, references in metric_batches:
-    #             img = img.to(device)
+    # Evaluate metrics
+    if epoch % EVAL_FREQ == 0:
+        metric_batches = tqdm(
+            loader_for_metrics,
+            desc=f"Metrics for epoch {epoch+1}:",
+            leave=True,
+        )
+        with torch.no_grad():
+            decoded_preds = []
+            decoded_refs = []
+            model.eval()
+            for img, references, _ in metric_batches:
+                img = img.to(device)
+                pred = model.generate(
+                    img,
+                    None,
+                    NUM_BEAMS,
+                    CONTEXT_SIZE,
+                    LENGTH_ALPHA,
+                    SOS_IDX,
+                    PAD_IDX,
+                    EOS_IDX,
+                )
+                decoded_preds.extend(decode_predictions(pred, tokenizer))
+                decoded_refs.extend([tokenizer.decode_batch(ref) for ref in references])
 
-    #             # Get and decode predictions.
-    #             predictions = model.generate(
-    #                 img,
-    #                 None,
-    #                 NUM_BEAMS,
-    #                 CONTEXT_SIZE,
-    #                 LENGTH_ALPHA,
-    #                 SOS_IDX,
-    #                 PAD_IDX,
-    #                 EOS_IDX,
-    #             )
-    #             decoded_predictions = decode_predictions(predictions, tokenizer)
-    #             all_preds.extend(decoded_predictions)
+            # Remove any empty predictions. Record percentage.
+            cleaned_preds = []
+            cleaned_refs = []
+            for pred, ref in zip(decoded_preds, decoded_refs):
+                if pred.strip():
+                    cleaned_preds.append(pred)
+                    cleaned_refs.append(ref)
 
-    #             # Decode references.
-    #             for ref_group in references:
-    #                 decoded = tokenizer.decode_batch(
-    #                     ref_group, skip_special_tokens=True
-    #                 )
-    #                 all_refs.append(decoded)
-
-    #         cleaned_preds, cleaned_refs = [], []
-    #         for pred, refs in zip(all_preds, all_refs):
-    #             if not pred.strip():
-    #                 continue
-    #             cleaned_preds.append(pred)
-    #             cleaned_refs.append(refs)
-    #         # Compute BLEU
-    #         bleu_score = bleu.compute(
-    #             predictions=cleaned_preds, references=cleaned_refs
-    #         )
-    #         history["bleu_scores"][epoch] = bleu_score
+            if len(cleaned_preds) == 0:
+                print("Unable to compute BLEU: no non-empty predictions.")
+            else:
+                bleu_score = bleu.compute(
+                    predictions=cleaned_preds, references=cleaned_refs
+                )
+                percentage_used = 100 * len(cleaned_preds) / len(decoded_preds)
+                history["bleu_scores"][epoch + 1] = {
+                    "score": bleu_score["bleu"],
+                    "percentage_used": percentage_used,
+                }
 
     # Checkpoint
     history["epochs_completed"] += 1

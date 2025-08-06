@@ -9,6 +9,7 @@ CONFIG_PATH = os.path.join(cwd, "config.yaml")
 TOKENIZER_PATH = os.path.join(DATA_DIR, "coco_bpe_tokenizer.json")
 ENCODER_CHECKPOINT_PATH = os.path.join(cwd, "checkpoints", "encoder")
 CAPTIONER_CHECKPOINT_PATH = os.path.join(cwd, "checkpoints", "captioner")
+RESULTS_PATH = os.path.join(cwd, "results.pt")
 
 images = {
     "train": os.path.join(DATA_DIR, "train2017"),
@@ -38,6 +39,7 @@ paths = {
     "tokenizer": TOKENIZER_PATH,
     "encoder_checkpoint": ENCODER_CHECKPOINT_PATH,
     "captioner_checkpoint": CAPTIONER_CHECKPOINT_PATH,
+    "results": RESULTS_PATH,
     "images": images,
     "captions": captions,
     "captions_tokenized": captions_tokenized,
