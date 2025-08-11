@@ -1,6 +1,6 @@
-context_size: 60
 patch_size: 16
 image_size: 224
+context_size: 60
 vocab_size: 5000
 
 image_encoder:
@@ -31,30 +31,23 @@ caption_decoder:
   dropout: 0.2
 
 # Data loader
-batch_size: 128
-num_workers: 10 # Set according to your hardware
-
-# Encoder training
-total_image_encoder_epochs: 90
-cur_image_encoder_epochs: 5 # The number of epochs for the next compute.
-auto_encoder_warmup_epochs: 8
-masking_ratio: 0.75
-auto_encoder_lr: 8e-5
-auto_encoder_start_factor: 0.05
-auto_encoder_eta_min: 1e-6
-auto_encoder_wd: 0.1
+batch_size: 64
+num_workers: 8 # Set according to your hardware
 
 # Captioner training
-total_captioner_epochs: 30
-cur_captioner_epochs: 2
-captioner_warmup_epochs: 2
-captioner_lr: 1e-4
+total_epochs: 30
+cur_epochs: 3
+warmup_epochs: 2
+lr: 1e-4
 captioner_start_factor: 0.05
-captioner_eta_min: 0
-captioner_wd: 0.1
+eta_min: 0
+weight_decay: 0.1
 label_smoothing: 0.01
 eval_freq: 1
 
 # Generation for metrics.
 num_beams: 6
 length_alpha: 0.8
+
+unfreeze_lr_factor: 0.7
+unfreeze_start_epoch: 3

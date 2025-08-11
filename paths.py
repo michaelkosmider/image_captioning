@@ -5,6 +5,7 @@ import os
 cwd = os.getcwd()
 DATA_DIR = os.path.join(cwd, "data/coco")
 ANNOTATIONS_DIR = os.path.join(DATA_DIR, "annotations")
+CAPTIONER_CONFIG_PATH = os.path.join(cwd, "captioner_config.yaml")
 ENCODER_CONFIG_PATH = os.path.join(cwd, "encoder_config.yaml")
 TOKENIZER_PATH = os.path.join(DATA_DIR, "coco_bpe_tokenizer.json")
 ENCODER_CHECKPOINT_PATH = os.path.join(cwd, "checkpoints", "encoder")
@@ -38,6 +39,7 @@ image_ids = {
 paths = {
     "data": DATA_DIR,
     "annotations": ANNOTATIONS_DIR,
+    "captioner_config": CAPTIONER_CONFIG_PATH,
     "encoder_config": ENCODER_CONFIG_PATH,
     "tokenizer": TOKENIZER_PATH,
     "encoder_checkpoint": ENCODER_CHECKPOINT_PATH,

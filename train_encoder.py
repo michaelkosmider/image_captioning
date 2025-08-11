@@ -206,9 +206,7 @@ if __name__ == "__main__":
             scaler.update()
 
             train_loss += loss.item()
-            train_batches.set_postfix(
-                {"loss": loss.item(), "LR": scheduler.get_last_lr()}
-            )
+            train_batches.set_postfix({"loss": loss.item()})
 
         scheduler.step()
 
