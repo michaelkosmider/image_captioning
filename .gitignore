@@ -2,3 +2,4 @@ data
 *.zip
 *pycache*
 checkpoints
+scratch_paper.ipynb

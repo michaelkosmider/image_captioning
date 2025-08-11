@@ -1,8 +1,17 @@
 from torchvision import transforms
 
-__all__ = ["image_transform_index"]
+__all__ = ["encoder_image_transform_index", "captioner_image_transform_index"]
 
-train_image_transform = transforms.Compose(
+encoder_train_image_transform = transforms.Compose(
+    [
+        transforms.RandomResizedCrop(224, scale=(0.5, 1.0), interpolation=3),
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ]
+)
+
+captioner_train_image_transform = transforms.Compose(
     [
         transforms.RandomResizedCrop(224, scale=(0.9, 1.0), ratio=(0.9, 1.1)),
         transforms.RandomHorizontalFlip(p=0.5),
@@ -21,4 +30,12 @@ val_image_transform = transforms.Compose(
     ]
 )
 
-image_transform_index = {"train": train_image_transform, "val": val_image_transform}
+encoder_image_transform_index = {
+    "train": encoder_train_image_transform,
+    "val": val_image_transform,
+}
+
+captioner_image_transform_index = {
+    "train": captioner_train_image_transform,
+    "val": val_image_transform,
+}

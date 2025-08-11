@@ -59,6 +59,11 @@ download_and_extract(
     "http://images.cocodataset.org/zips/val2017.zip", paths["data"], "val2017"
 )
 download_and_extract(
+    "http://images.cocodataset.org/zips/unlabeled2017.zip",
+    paths["data"],
+    "unlabeled2017",
+)
+download_and_extract(
     "http://images.cocodataset.org/zips/test2017.zip", paths["data"], "test2017"
 )
 # Annotations
@@ -115,9 +120,13 @@ else:
 # iterable over image ids.
 # =============================================================================
 
-# TODO: not very fault tolerant.
+os.makedirs(paths["processed"], exist_ok=True)
 for split in ["train", "val"]:
-    if not os.path.exists(paths["captions_tokenized"][split]):
+    if (
+        not os.path.exists(paths["captions_tokenized"][split])
+        or not os.path.exists(paths["image_to_captions"][split])
+        or not os.path.exists(paths["image_ids"][split])
+    ):
 
         with open(paths["captions"][split], "r") as f:
             annotations = json.load(f)["annotations"]
@@ -142,3 +151,9 @@ for split in ["train", "val"]:
                 list(image_to_captions.items()), paths["image_to_captions"][split]
             )
             torch.save(list(image_to_captions.keys()), paths["image_ids"][split])
+
+# Get a list of unlabeled image_ids as well.
+if not os.path.exists(paths["image_ids"]["unlabeled"]):
+    unlabeled_filenames = os.listdir(paths["images"]["unlabeled"])
+    image_ids = [int(f[:-4]) for f in unlabeled_filenames if f.endswith(".jpg")]
+    torch.save(image_ids, paths["image_ids"]["unlabeled"])

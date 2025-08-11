@@ -4,7 +4,7 @@ image_size: 224
 vocab_size: 5000
 
 image_encoder:
-  stack_size: 14
+  stack_size: 12
   num_heads: 12
   hidden_size: 768
   key_size: 64
@@ -19,7 +19,7 @@ image_decoder:
   key_size: 64
   value_size: 64
   feedforward_size: 1024 
-  dropout: 0.1
+  dropout: 0.2
 
 caption_decoder:
   stack_size: 6

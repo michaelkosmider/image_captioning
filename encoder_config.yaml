@@ -1,0 +1,34 @@
+patch_size: 16
+image_size: 224
+
+image_encoder:
+  stack_size: 12
+  num_heads: 12
+  hidden_size: 768
+  key_size: 64
+  value_size: 64
+  feedforward_size: 3072
+  dropout: 0
+
+image_decoder:
+  stack_size: 4         
+  num_heads: 8          
+  hidden_size: 768     
+  key_size: 64
+  value_size: 64
+  feedforward_size: 1024 
+  dropout: 0
+
+# Data loader
+batch_size: 64
+num_workers: 8 # Set according to your hardware
+
+# Encoder training
+total_epochs: 90
+cur_epochs: 10 # The number of epochs for the next compute.
+warmup_epochs: 8
+masking_ratio: 0.75
+lr: 1e-4
+start_factor: 0.05
+eta_min: 1e-6
+weight_decay: 0.05

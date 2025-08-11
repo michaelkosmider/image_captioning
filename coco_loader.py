@@ -5,6 +5,7 @@ from torch.nn.utils.rnn import pad_sequence
 from paths import paths
 from functools import partial
 import os
+import sys
 
 __all__ = ["get_coco_loader"]
 
@@ -60,11 +61,25 @@ class ImgFirstDataset(Dataset):
 
 class ImageOnlyDataset(Dataset):
 
-    def __init__(self, images_path, image_ids_path, image_transform):
+    def __init__(
+        self,
+        images_path,
+        image_ids_path,
+        image_transform,
+        unlaleled_images_path=None,
+        unlabeled_image_ids_path=None,
+    ):
         super().__init__()
 
         self.images_path = images_path
         self.image_ids = torch.load(image_ids_path, weights_only=False)
+
+        if unlabeled_image_ids_path is not None:
+            self.unlabeled_start_idx = len(self.image_ids)
+            self.image_ids.extend(
+                torch.load(unlabeled_image_ids_path, weights_only=False)
+            )
+            self.unlabeled_images_path = unlaleled_images_path
 
         self.image_transform = image_transform
 
@@ -74,7 +89,12 @@ class ImageOnlyDataset(Dataset):
     def __getitem__(self, idx):
 
         image_id = self.image_ids[idx]
-        image_path = os.path.join(self.images_path, f"{image_id:012}.jpg")
+
+        if hasattr(self, "unlabeled_images_path") and idx >= self.unlabeled_start_idx:
+            image_path = os.path.join(self.unlabeled_images_path, f"{image_id:012}.jpg")
+        else:
+            image_path = os.path.join(self.images_path, f"{image_id:012}.jpg")
+
         image = Image.open(image_path).convert("RGB")
         image_transformed = self.image_transform(image)
 
@@ -115,29 +135,45 @@ def get_coco_loader(
     small=False,
     small_frac=0.01,
     mode="caption_first",
+    include_unlabeled=False,
+    pin_memory=True,
 ):
 
-    dataset = (
-        CaptFirstDataset(
+    # Get the specified dataset.
+    if mode == "caption_first":
+        dataset = CaptFirstDataset(
             paths["images"][split],
             paths["captions_tokenized"][split],
             transform,
         )
-        if mode == "caption_first"
-        else (
-            ImgFirstDataset(
-                paths["images"][split], paths["image_to_captions"][split], transform
-            )
-            if mode == "image_first"
-            else ImageOnlyDataset(
-                paths["images"][split], paths["image_ids"][split], transform
-            )
+    elif mode == "image_first":
+        dataset = ImgFirstDataset(
+            paths["images"][split], paths["image_to_captions"][split], transform
         )
-    )
+    elif mode == "image_only" and not include_unlabeled:
+        dataset = ImageOnlyDataset(
+            paths["images"][split], paths["image_ids"][split], transform
+        )
+    elif mode == "image_only" and include_unlabeled:
+        dataset = ImageOnlyDataset(
+            paths["images"][split],
+            paths["image_ids"][split],
+            transform,
+            paths["images"]["unlabeled"],
+            paths["image_ids"]["unlabeled"],
+        )
+    else:
+        dataset = None
+
+    if not dataset:
+        print(f"Invalid dataset specification:")
+        print(f"mode: {mode}")
+        print(f"include_unlabeled: {include_unlabeled}")
+        sys.exit(1)
 
     # Prune dataset if small is True
     if small:
-        num_samples = int(small_frac * len(dataset))
+        num_samples = max(int(small_frac * len(dataset)), batch_size * 2)
         inds = torch.randperm(len(dataset))[:num_samples]
         dataset = Subset(dataset, inds)
 
@@ -153,7 +189,7 @@ def get_coco_loader(
             else image_first_collate_fn if mode == "image_first" else None
         ),
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=pin_memory,
         drop_last=drop_last,
     )
 
