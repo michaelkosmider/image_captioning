@@ -206,11 +206,12 @@ if __name__ == "__main__":
             scaler.update()
 
             train_loss += loss.item()
-            train_batches.set_postfix({"loss": loss.item()})
-
-        scheduler.step()
+            train_batches.set_postfix(
+                {"loss": loss.item(), "LR": scheduler.get_last_lr()}
+            )
 
         history["train_losses"].append(train_loss / len(train_batches))
+        scheduler.step()
 
         # Validate
         with torch.no_grad():

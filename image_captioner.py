@@ -6,6 +6,8 @@ from transformer_components import (
     TransformerEncoder,
 )
 
+__all__ = ["ImageEncoder", "ImageDecoder", "ImageAutoEncoder", "CaptionDecoder"]
+
 
 class PatchEmbedding(nn.Module):
 
@@ -69,7 +71,7 @@ class ImageDecoder(nn.Module):
 
         self.transformer_decoder = TransformerEncoder(
             **image_decoder_config
-        )  # It's actually an encoder, because no cross attention.
+        )  # It's actually an encoder, because no cross attention used.
 
         self.project = nn.Linear(
             image_decoder_config["hidden_size"], 3 * patch_size * patch_size
@@ -129,7 +131,7 @@ class CaptionDecoder(nn.Module):
         )
         self.transformer_decoder = TransformerDecoder(**caption_decoder_config)
 
-        # Store for generate function
+        # Store for generate function in TransformerEncoderDecoder
         self.key_size = caption_decoder_config["key_size"]
         self.value_size = caption_decoder_config["value_size"]
         self.num_heads = caption_decoder_config["num_heads"]

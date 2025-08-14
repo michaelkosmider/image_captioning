@@ -7,10 +7,26 @@ from functools import partial
 import os
 import sys
 
-__all__ = ["get_coco_loader"]
+__all__ = ["get_coco_loader", "decode_predictions"]
 
 
 class CaptFirstDataset(Dataset):
+    """
+    Iterates over (image, caption) pairs. The captions are all loaded into RAM at
+    construction time, but the images are read from disk in __getitem__.
+
+    Args:
+        images_path (str): Path to a directory containing image files.
+        annotations_path (str): Path to a *_tokenized.pt file.
+        image_transform (callable): Any transform that takes in a PIL.Image.Image
+            and returns a torch.Tensor.
+
+    __getitem__:
+        Given an index, returns:
+            tuple:
+                image (torch.Tensor): The transformed image.
+                caption (torch.Tensor): The corresponding caption, a tensor of token IDs.
+    """
 
     def __init__(self, images_path, annotations_path, image_transform):
         super().__init__()
@@ -37,6 +53,25 @@ class CaptFirstDataset(Dataset):
 
 
 class ImgFirstDataset(Dataset):
+    """
+    Iterates over (image, [5 caption], image_id) triplets. The captions and
+    image ids are all loaded into RAM at construction time, but the
+    images are read from disk in __getitem__.
+
+    Args:
+        images_path (str): Path to a directory containing image files.
+        im2capts_path (str): Path to a *_im2capts.pt file.
+        image_transform (callable): Any transform that takes in a PIL.Image.Image
+            and returns a torch.Tensor.
+
+    __getitem__:
+        Given an index, returns:
+            tuple:
+                image (torch.Tensor): The transformed image.
+                caption (List[List[int]]): The 5 corresponding captions, each of which is
+                    a list of int.
+                image_id(int): The id of the image.
+    """
 
     def __init__(self, images_path, im2capts_path, image_transform):
         super().__init__()
@@ -60,6 +95,24 @@ class ImgFirstDataset(Dataset):
 
 
 class ImageOnlyDataset(Dataset):
+    """
+    Iterates over images, which are read from disk in __getitem__.
+
+    Args:
+        images_path (str): Path to a directory containing image files.
+        image_ids_path (str): Path to a *_image_ids.pt file.
+        image_transform (callable): Any transform that takes in a PIL.Image.Image
+            and returns a torch.Tensor.
+        unlabeled_images_path (str, optional): Path to a directory containing image files. Intended
+            specifically for "unlabeled2017"
+        unlabeled_image_ids_path (str, optional): Path to a *_image_ids.pt file. Intended specifically
+            for "unlabeled_image_ids.pt".
+
+    __getitem__:
+        Given an index, returns:
+            tuple:
+                image (torch.Tensor): The transformed image.
+    """
 
     def __init__(
         self,

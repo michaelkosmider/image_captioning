@@ -1,25 +1,5 @@
-patch_size: 16
-image_size: 224
 context_size: 60
 vocab_size: 5000
-
-image_encoder:
-  stack_size: 12
-  num_heads: 12
-  hidden_size: 768
-  key_size: 64
-  value_size: 64
-  feedforward_size: 3072
-  dropout: 0.2
-
-image_decoder:
-  stack_size: 4         
-  num_heads: 8          
-  hidden_size: 768     
-  key_size: 64
-  value_size: 64
-  feedforward_size: 1024 
-  dropout: 0.2
 
 caption_decoder:
   stack_size: 6
@@ -36,7 +16,7 @@ num_workers: 8 # Set according to your hardware
 
 # Captioner training
 total_epochs: 30
-cur_epochs: 3
+cur_epochs: 16
 warmup_epochs: 2
 lr: 1e-4
 captioner_start_factor: 0.05

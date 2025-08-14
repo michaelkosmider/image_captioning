@@ -77,8 +77,6 @@ download_and_extract(
 keep = {
     "captions_train2017.json",
     "captions_val2017.json",
-    "train_tokenized.pt",
-    "val_tokenized.pt",
 }
 for file in os.listdir(paths["annotations"]):
     if file not in keep:
@@ -100,6 +98,7 @@ else:
     tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
 
     # Get trainer and training data for tokenizer.
+    # TODO: fix hardcoded vocab size.
     trainer = trainers.BpeTrainer(
         vocab_size=5000, special_tokens=["<SOS>", "<EOS>", "<PAD>", "<UNK>"]
     )
@@ -115,9 +114,10 @@ else:
     tokenizer.save(paths["tokenizer"])
 
 # =============================================================================
-# Section 3: Tokenize all captions. Save three data structures: a list of
-# captions with image id, a dict of image ids to all 5 captions, and an
-# iterable over image ids.
+# Section 3: Tokenize all captions. Save seven data structures: a list of
+# captions with image id (train/val), a dict of image ids to all 5 captions
+# (train/val), an iterable over image ids (train/val), and a list of all
+# unlabeled image ids.
 # =============================================================================
 
 os.makedirs(paths["processed"], exist_ok=True)

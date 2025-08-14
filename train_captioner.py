@@ -92,41 +92,44 @@ if __name__ == "__main__":
     EOS_IDX = tokenizer.token_to_id("<EOS>")
     PAD_IDX = tokenizer.token_to_id("<PAD>")
 
+    with open(paths["encoder_config"], "r") as f:
+        MAE_config = yaml.safe_load(f)
+
     with open(paths["captioner_config"], "r") as f:
-        config = yaml.safe_load(f)
+        captioner_config = yaml.safe_load(f)
 
-    BATCH_SIZE = config["batch_size"]
-    NUM_WORKERS = config["num_workers"]
+    BATCH_SIZE = captioner_config["batch_size"]
+    NUM_WORKERS = captioner_config["num_workers"]
 
-    VOCAB_SIZE = config["vocab_size"]
-    CONTEXT_SIZE = config["context_size"]
-    PATCH_SIZE = config["patch_size"]
-    IMAGE_SIZE = config["image_size"]
+    VOCAB_SIZE = captioner_config["vocab_size"]
+    CONTEXT_SIZE = captioner_config["context_size"]
+    PATCH_SIZE = MAE_config["patch_size"]
+    IMAGE_SIZE = MAE_config["image_size"]
 
-    EVAL_FREQ = config["eval_freq"]
-    TOTAL_EPOCHS = config["total_epochs"]
-    CUR_EPOCHS = config["cur_epochs"]
-    WARMUP_EPOCHS = config["warmup_epochs"]
+    EVAL_FREQ = captioner_config["eval_freq"]
+    TOTAL_EPOCHS = captioner_config["total_epochs"]
+    CUR_EPOCHS = captioner_config["cur_epochs"]
+    WARMUP_EPOCHS = captioner_config["warmup_epochs"]
 
-    START_FACTOR = float(config["captioner_start_factor"])
-    LEARNING_RATE = float(config["lr"])
-    UNFREEZE_LR_FACTOR = float(config["unfreeze_lr_factor"])
-    UNFREEZE_START_EPOCH = config["unfreeze_start_epoch"]
-    ETA_MIN = float(config["eta_min"])
-    WEIGHT_DECAY = float(config["weight_decay"])
-    LABEL_SMOOTHING = float(config["label_smoothing"])
+    START_FACTOR = float(captioner_config["captioner_start_factor"])
+    LEARNING_RATE = float(captioner_config["lr"])
+    UNFREEZE_LR_FACTOR = float(captioner_config["unfreeze_lr_factor"])
+    UNFREEZE_START_EPOCH = captioner_config["unfreeze_start_epoch"]
+    ETA_MIN = float(captioner_config["eta_min"])
+    WEIGHT_DECAY = float(captioner_config["weight_decay"])
+    LABEL_SMOOTHING = float(captioner_config["label_smoothing"])
 
-    LENGTH_ALPHA = float(config["length_alpha"])
-    NUM_BEAMS = config["num_beams"]
+    LENGTH_ALPHA = float(captioner_config["length_alpha"])
+    NUM_BEAMS = captioner_config["num_beams"]
 
-    STACK_SIZE = config["image_encoder"]["stack_size"]
+    STACK_SIZE = captioner_config["image_encoder"]["stack_size"]
 
-    image_encoder_config = config["image_encoder"]
-    caption_decoder_config = config["caption_decoder"]
+    image_encoder_config = MAE_config["image_encoder"]
+    caption_decoder_config = captioner_config["caption_decoder"]
 
     # Set device.
-    if "device" in config:
-        device = config["device"]
+    if "device" in captioner_config:
+        device = captioner_config["device"]
     else:
         device = (
             "cuda"
@@ -230,7 +233,7 @@ if __name__ == "__main__":
 
     # Feeze the layers that should still be frozen.
     for unfreeze_epoch, sub_module in unfreeze_schedule.items():
-        if unfreeze_epoch <= history["epochs_completed"]:
+        if unfreeze_epoch < history["epochs_completed"]:
             # Don't freeze
             pass
         else:
@@ -324,9 +327,7 @@ if __name__ == "__main__":
             scaler.update()
 
             train_loss += loss.item() * batch_token_count
-            train_batches.set_postfix(
-                {"loss": loss.item(), "LR": scheduler.get_last_lr()}
-            )
+            train_batches.set_postfix({"loss": loss.item()})
 
         history["learning_rates"].append(list(scheduler.get_last_lr()))
         history["train_losses"].append(train_loss / train_token_count)
