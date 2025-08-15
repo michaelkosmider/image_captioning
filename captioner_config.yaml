@@ -1,5 +1,16 @@
 context_size: 60
 vocab_size: 5000
+patch_size: 16
+image_size: 224
+
+image_encoder:
+  stack_size: 14
+  num_heads: 12
+  hidden_size: 768
+  key_size: 64
+  value_size: 64
+  feedforward_size: 3072
+  dropout: 0.2
 
 caption_decoder:
   stack_size: 6
@@ -19,7 +30,7 @@ total_epochs: 30
 cur_epochs: 16
 warmup_epochs: 2
 lr: 1e-4
-captioner_start_factor: 0.05
+start_factor: 0.05
 eta_min: 0
 weight_decay: 0.1
 label_smoothing: 0.01

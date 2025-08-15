@@ -77,18 +77,20 @@ class ImageDecoder(nn.Module):
             image_decoder_config["hidden_size"], 3 * patch_size * patch_size
         )
 
-    def forward(self, unmasked_patch_tokens, positions):
+    def forward(self, encoded_unmasked_patches, positions):
         # Initialize the decoder input to the masked patch token everywhere. Then fill in
         # unmasked positions with their corresponding encoder output.
-        all_patch_tokens = torch.expand_copy(
+        encoded_all_patches = torch.expand_copy(
             self.masked_patch_token,
-            (unmasked_patch_tokens.shape[0], self.num_patches, -1),
+            (encoded_unmasked_patches.shape[0], self.num_patches, -1),
         )
-        inds = positions.unsqueeze(-1).expand(-1, -1, unmasked_patch_tokens.shape[-1])
-        all_patch_tokens.scatter_(1, inds, unmasked_patch_tokens)
+        inds = positions.unsqueeze(-1).expand(
+            -1, -1, encoded_unmasked_patches.shape[-1]
+        )
+        encoded_all_patches.scatter_(1, inds, encoded_unmasked_patches)
 
-        X = all_patch_tokens + self.positional_encoding(
-            torch.arange(self.num_patches, device=unmasked_patch_tokens.device)
+        X = encoded_all_patches + self.positional_encoding(
+            torch.arange(self.num_patches, device=encoded_unmasked_patches.device)
         )
         X = self.transformer_decoder(X, key_padding_mask=None)
         X = self.project(X)

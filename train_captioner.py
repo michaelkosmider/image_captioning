@@ -111,7 +111,7 @@ if __name__ == "__main__":
     CUR_EPOCHS = captioner_config["cur_epochs"]
     WARMUP_EPOCHS = captioner_config["warmup_epochs"]
 
-    START_FACTOR = float(captioner_config["captioner_start_factor"])
+    START_FACTOR = float(captioner_config["start_factor"])
     LEARNING_RATE = float(captioner_config["lr"])
     UNFREEZE_LR_FACTOR = float(captioner_config["unfreeze_lr_factor"])
     UNFREEZE_START_EPOCH = captioner_config["unfreeze_start_epoch"]

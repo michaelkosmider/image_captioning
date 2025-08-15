@@ -14,6 +14,26 @@ import pickle
 import sys
 from torch.amp import autocast, GradScaler
 
+__all__ = ["get_patch_indices"]
+
+
+def get_patch_indices(batch_size, seq_len, ratio, device):
+    positions = torch.randint(
+        0,
+        seq_len,
+        (
+            batch_size,
+            seq_len,
+        ),
+        device=device,
+    )
+    split_idx = int(seq_len * ratio)
+    masked_positions = positions[:, :split_idx]
+    unmasked_positions = positions[:, split_idx:]
+
+    return masked_positions, unmasked_positions
+
+
 if __name__ == "__main__":
     # Parse arguments
     parser = argparse.ArgumentParser()
@@ -117,7 +137,13 @@ if __name__ == "__main__":
     scaler = GradScaler(device=device)
 
     # Initialize training history.
-    history = {"train_losses": [], "val_losses": [], "epochs_completed": 0}
+    history = {
+        "train_losses": [],
+        "val_losses": [],
+        "epochs_completed": 0,
+        "learning_rates": {},
+        "config": config,
+    }
 
     # Load all of the above from checkpoint if a checkpoint was passed in.
     if checkpoint is not None:
@@ -125,6 +151,12 @@ if __name__ == "__main__":
         model.image_decoder.load_state_dict(checkpoint["image_decoder_state_dict"])
         scaler.load_state_dict(checkpoint["scaler_state_dict"])
         history = checkpoint["history"]
+        # tmp
+        if not "learning_rates" in history:
+            history["learning_rates"] = {}
+        # tmp
+        if not "config" in history:
+            history["config"] = config
         optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 
@@ -165,31 +197,27 @@ if __name__ == "__main__":
         )
         train_loss = 0
 
+        # tmp here, to be moved down
+        history["learning_rates"][epoch] = scheduler.get_last_lr()
+
         model.train()
         for image in train_batches:
             optimizer.zero_grad()
 
             image = image.to(device)
-            positions = torch.randint(
-                0,
-                NUM_PATCHES,
-                (
-                    image.shape[0],
-                    NUM_PATCHES,
-                ),
-                device=image.device,
+
+            masked_positions, unmasked_positions = get_patch_indices(
+                image.shape[0], NUM_PATCHES, MASKING_RATIO, image.device
             )
-            masked_positions = positions[:, :NUM_MASKED_PATCHES]
-            unmasked_positions = positions[:, NUM_MASKED_PATCHES:]
 
             with autocast(device_type=device):
                 # Create labels
-                image_patches = patch_extracter(image).transpose(-1, -2)
+                ground_image_patches = patch_extracter(image).transpose(-1, -2)
                 ground_inds = masked_positions.unsqueeze(-1).expand(
-                    -1, -1, image_patches.shape[-1]
+                    -1, -1, ground_image_patches.shape[-1]
                 )
                 ground_masked_patches = torch.gather(
-                    image_patches, dim=1, index=ground_inds
+                    ground_image_patches, dim=1, index=ground_inds
                 )
 
                 # Get predictions
@@ -223,25 +251,18 @@ if __name__ == "__main__":
             model.eval()
             for image in val_batches:
                 image = image.to(device)
-                positions = torch.randint(
-                    0,
-                    NUM_PATCHES,
-                    (
-                        image.shape[0],
-                        NUM_PATCHES,
-                    ),
-                    device=image.device,
+
+                masked_positions, unmasked_positions = get_patch_indices(
+                    image.shape[0], NUM_PATCHES, MASKING_RATIO, image.device
                 )
-                masked_positions = positions[:, :NUM_MASKED_PATCHES]
-                unmasked_positions = positions[:, NUM_MASKED_PATCHES:]
 
                 # Create labels
-                image_patches = patch_extracter(image).transpose(-1, -2)
+                ground_image_patches = patch_extracter(image).transpose(-1, -2)
                 ground_inds = masked_positions.unsqueeze(-1).expand(
-                    -1, -1, image_patches.shape[-1]
+                    -1, -1, ground_image_patches.shape[-1]
                 )
                 ground_masked_patches = torch.gather(
-                    image_patches, dim=1, index=ground_inds
+                    ground_image_patches, dim=1, index=ground_inds
                 )
 
                 # Get predictions
@@ -268,9 +289,7 @@ if __name__ == "__main__":
             "scaler_state_dict": scaler.state_dict(),
             "history": history,
         }
-        epochs_completed = history[
-            "epochs_completed"
-        ]  # Trouble putting this directly in the f string.
+        epochs_completed = history["epochs_completed"]
         checkpoint_path = os.path.join(
             paths["encoder_checkpoint"], f"checkpoint{epochs_completed}.pt"
         )

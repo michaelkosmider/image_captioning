@@ -16,6 +16,10 @@ In section 2, I instantiate a Hugging Face tokenizer which uses byte pair encodi
 
 Finally, section three tokenizes every caption and creates several data structures. Have a look at examples 2-4 in code_snippets.ipynb to understand what is contained in these structures. Example 2 also illustrates how load and display an image, and how to use the tokenizer to decode.
 
+The data directory should look like so after running process_coco.py:
+
+![Data Directory Structure.](writeup_diagrams/data_directory_structure.png)
+
 ## The Datasets and DataLoaders.
 
 The Dataset definitions are found in coco_loader.py. Their implementations, and in particular the __getitem__ methods, depend heavily on the data structures generated in process_coco.py. You'll find three distinct Dataset classes: CaptFirstDataset, ImgFirstDataset, and ImageOnlyDataset. Have a look at the docstrings for details.
@@ -48,11 +52,11 @@ Finally, the CaptionDecoder builds upon the TransformerDecoder, which is an exac
 
 In train_encoder.py you will find the main logic of the training loop. You can run it with 
 
-"python train_encoder.py" 
+`python train_encoder.py` 
 
 to train from scratch, or with 
 
-"python train_encoder.py -c checkpoint*.pt" 
+`python train_encoder.py -c checkpoint*.pt` 
 
 to train from a checkpoint. Checkpoints are automatically saved at the end of each epoch, with * representing the number of epochs completed.
 
@@ -60,61 +64,40 @@ Section 1 of train_encoder.py reads in the hyperparameters and training configur
 
 Section 2 instantiates all of the training loop elements, possibly from a checkpoint: the masked auto encoder itself, training history, AdamW optimizer, warmup + cosine annealing scheduler, gradient scaler (helpful for mixed precision training), MSE loss function, and the ImageOnlyDataset loader. 
 
-Section 3 is the training loop, and line 196 specifically shows you how to use the autoencoder. You have to pass in a batch of images, as well as a corresponding batch of unmasked positions which must have shape (N_batch, # of masked patches). Thus, for each image of the batch, you must randomly select NUM_PATCHES - NUM_MASKED_PATCHES patches to remain unmasked. This selection is reflected in the tensor unmasked_position. The model then reconstructs ALL image patches on line 196, including the unmasked ones. 
+Section 3 is the training loop, and line 196 specifically shows you how to use the auto encoder. You have to pass in a batch of images, as well as a corresponding batch of unmasked positions which must have shape (N_batch, # of masked patches). Below is a visualization of the computations that occur, where the input is a batch of 2 images split into 9 patches, and I omitted the channel dimension.
 
-Computing the loss is a little bit tricky, because it is only computed on the predictions for masked patches. We don't care whether the model can predict unmasked patches since it just needs to learn the identity function for that. Again, the autoencoder predicts all patches, but the function torch.gather allows us to select the predicitions for masked patches only, as well as the masked patches themselves. Below is a visualization of the entire input to loss pipeline, clarifying what torch.gather actually does. Hopefully it also clarifies the role of unmasked_patches in the interaction between the encoder and decoder.
+![Diagram explaining the ImageAutoEncoder forward method.](writeup_diagrams/auto_image_encoder.png)
+
+The MSE loss is only computed for the reconstructions of masked patches. The masked patches as well as their reconstructions are selected using `torch.gather`.
+
+The image augmentations used for training the auto encoder are found in image_transforms.py. They consist of a `RandomResizedCrop` with a big variance in scale (0.2,1), as well as a `RandomHorizontalFlip`, which help the ViT to learn more robust features. Each image is scaled down to [0,1] and then normalized according to ImageNet statistics.
 
 ## Captioner Training. 
 
-Coming soon!
+The captioner training logic is found in train_captioner.py, which has a very similar structure to train_encoder.py. You can either run it with 
 
-## Incomplete Notes to be incorporated.
+`python train_captioner.py -p checkpoint*.pt` if training the caption decoder from scratch, where the checkpoint file is one that was created by train_encoder.py and thus contains the ViT weights, or with
 
-methods and implementations
+`python train_captioner.py -c checkpoint*.pt` if resuming from a checkpoint.
 
-Model 
+The main difference between ViT and captioner training is the optimization scheme. The parameters are split into the following groups: patch embedder, each individual encoder layer, and the whole decoder. Starting from the unfreeze start epoch specified in captioner_config.yaml, one parameter group is unfrozen every epoch. Each parameter group has 0.7 of the base learning rate of the group above it, and the order of unfreezing is from the top encoder layer down to the patch embedder. The purpose of this scheme is to preserve features learned by the ViT, avoiding catastrophic forgetting. The scheduling approach is otherwise the same as in the ViT training.
 
-- Built my own transformer implementation from scratch, including beam search with KV caching.
-- The ImageAutoEncoder consists of ImageEncoder + ImageDecoder, whereas the captioner model is an ImageEncoder + CaptionDecoder. I implemented all of these from scratch too, built on top of my transformer implementation. Found in image_captioner.py
+The loss function is cross entropy (average over all tokens) with label smoothing, and the evaluation metric is BLEU-4.
 
-Training
-- AdamW with warmup and cosine annealing
-- mixed precision training with gradient scaling
-- unfreezing + lower LR groups and label smoothing for captioner
+As you can see in lines 308 and 309, the label for each token is the token directly after it. The last token, which is either "<EOS>" or "<PAD>" is not passed into the captioner.
 
-Data and Augmentations
+## Results 
 
-- Download and tokenization in process_coco.py.
-- tokenization using BPE with 5000 word vocab size.
-- saving 4 datastructures for the dataset classes to use.
-- Captions are truncated after 60 because most are 20 long and rare cases go to 80.
-- Created three custom dataloaders from scratch:
-    - caption first for training captioner
-    - image first for metrics on captioner
-    - image only for MAE
-- custom collate fns for image_first and caption_first 
-- These cocoloaders are acquired with get_coco_loader, exposed inside coco_loader.py
-- Originally used rrc + flip + jitter with large encoder model. Now attempting rrc + flip + ra with slightly smaller model to see if overfitting improves.
+You will find a variety of different results in results.ipynb. 
 
+### The Masked Auto Encoder
 
-MAE
+The masked auto encoder wasn't trained long enough to converge due to computational constraints, although it got close. Qualitatively, it is able to reconstruct image patches with the right colors, but not necessarily in detail.
 
-- training logic in train_encoder.py
-- Patch embedding is a conv2d. 
-- MAE to pretrain the image encoder.
-    - After patches are embedded, 25% of them are randomly selected (greatly simplified by torch.gather) to go into the encoder.
-    - The positions of those selected patches (also called the unmasked patches) are also passed into the encoder, so that the correct positional embeddings are applied.
-    - The outputs of the encoder are placed into the decoder input according to their original positions The remaining tokens are all the same "masked token".
-    - The decoder attempts to predict pixel values for the masked positions, and the ground truths are the masked patches themselves. 
+A model of this size requires massive amounts of data to train, and the next step will be to build an ImageNet pipeline. I will have the resources to do this within a few weeks. 
 
-    changes from 1st attempt to second: doubling the data with unlabeled, lowered dropout to 0, decreased encoder size from 14 to 12, increased lr to 1e-4, but batch size is 64 due to compute (on mac), removed jitter augmentation, broadened scale (maybe not even enough), changed interpolation to 3
+### The Captioner
 
-Captioner
+Using beam search with 6 beams and a length normalization, the captioner achieved a BLEU-4 score of 21.4. It produced properly structured English sentences such as "a herd of sheep standing on top of a lush green field ." So while the decoder learned the structure of the English language, it unfortunately struggled to understand finer image semantics, often mistaking the names of objects with other similar looking objects like cat vs dog. Furthermore, the captioner suffered from severe overfitting, with the validation loss converging while the training loss was still decreasing steeply. 
 
-- training logic in train_captioner.py
-
-Results
-
-- decode_predictions
-- bleu score from hugging face
-
+I believe the next step of massively pre-training on ImageNet is going to help with both the overfitting issue and poor image understanding. 
