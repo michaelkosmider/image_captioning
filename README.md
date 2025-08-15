@@ -64,7 +64,7 @@ Section 1 of train_encoder.py reads in the hyperparameters and training configur
 
 Section 2 instantiates all of the training loop elements, possibly from a checkpoint: the masked auto encoder itself, training history, AdamW optimizer, warmup + cosine annealing scheduler, gradient scaler (helpful for mixed precision training), MSE loss function, and the ImageOnlyDataset loader. 
 
-Section 3 is the training loop, and line 196 specifically shows you how to use the auto encoder. You have to pass in a batch of images, as well as a corresponding batch of unmasked positions which must have shape (N_batch, # of masked patches). Below is a visualization of the computations that occur, where the input is a batch of 2 images split into 9 patches, and I omitted the channel dimension.
+Section 3 is the training loop, and line 224 specifically shows you how to use the auto encoder. You have to pass in a batch of images, as well as a corresponding batch of unmasked positions which must have shape (N_batch, # of masked patches). Below is a visualization of the computations that occur, where the input is a batch of 2 images split into 9 patches, and I omitted the channel dimension.
 
 ![Diagram explaining the ImageAutoEncoder forward method.](writeup_diagrams/auto_image_encoder.png)
 
