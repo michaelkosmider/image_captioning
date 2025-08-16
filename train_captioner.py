@@ -17,7 +17,7 @@ import evaluate
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 # My very own, in-house transformer implementation!!
-from transformer_components import (
+from transformer_components_michaelkosmider import (
     TransformerEncoderDecoder,
     get_causal_mask,
 )

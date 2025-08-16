@@ -1,7 +1,7 @@
 # Model Definition (using my very own transformer implementation defined in transformer_components!)
 import torch
 import torch.nn as nn
-from transformer_components import (
+from transformer_components_michaelkosmider import (
     TransformerDecoder,
     TransformerEncoder,
 )

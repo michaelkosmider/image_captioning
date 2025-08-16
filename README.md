@@ -40,7 +40,7 @@ The corresponding data loaders are returned by `get_coco_loader()`, whose args s
 
 The model implementation is found inside `image_captioner.py`, and the hyperparameters are found inside the `*_config.yaml` files. Example 8 shows how to initialize the masked autoencoder, as well as the full captioner model, as specified by the configs. 
 
-In the file you will find four classes, all of which are built on top of the `transformer_components` package (which I also wrote from scratch, see [*Transformer Tutorial with PyTorch*](https://michaelkosmider.github.io/transformertutorial/)): `ImageEncoder`, `ImageDecoder`, `ImageAutoEncoder`, and `CaptionDecoder`. Let's look at each one.
+In the file you will find four classes, all of which are built on top of the `transformer_components_michaelkosmider` package (which I also wrote from scratch, see [*Transformer Tutorial with PyTorch*](https://michaelkosmider.github.io/transformertutorial/)): `ImageEncoder`, `ImageDecoder`, `ImageAutoEncoder`, and `CaptionDecoder`. Let's look at each one.
 
 The `ImageEncoder` is precisely the ViT used in the captioning task. It contains a `PatchEmbedding` module, as well as a `TransformerEncoder` which comes from `transformer_components`. The `PatchEmbedding` module projects each image patch to an embedding, thus converting the image into a sequence of patches going from left to right, top down. Each embedding in the sequence is then injected with a positional encoding. The sequence is fed through the `TransformerEncoder`, which is an exact implementation of the encoder from [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762) (Vaswani et al., 2017). 
 
